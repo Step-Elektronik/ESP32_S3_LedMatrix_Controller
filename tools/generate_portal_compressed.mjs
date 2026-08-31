@@ -5,10 +5,12 @@ import zlib from 'node:zlib';
 const projectRoot = process.cwd();
 const portalPagePath = path.join(projectRoot, 'include', 'PortalPage.h');
 const appConfigPath = path.join(projectRoot, 'include', 'AppConfig.h');
+const i18nPath = path.join(projectRoot, 'web', 'portal-i18n.js');
 const outputPath = path.join(projectRoot, 'include', 'PortalCompressed.h');
 
 const portalSource = fs.readFileSync(portalPagePath, 'utf8');
 const appConfigSource = fs.readFileSync(appConfigPath, 'utf8');
+const i18nSource = fs.readFileSync(i18nPath, 'utf8');
 const versionMatch = appConfigSource.match(/#define\s+FIRMWARE_VERSION\s+"([^"]+)"/);
 if (!versionMatch) {
   throw new Error('FIRMWARE_VERSION was not found in AppConfig.h.');
@@ -73,8 +75,14 @@ const homeHtml = renderHtml(declarationExpression('home', 'settings'));
 const settingsHtml = renderHtml(declarationExpression('settings'));
 validateInlineScripts(homeHtml, 'home');
 validateInlineScripts(settingsHtml, 'settings');
+try {
+  new Function(i18nSource);
+} catch (error) {
+  throw new Error(`portal-i18n.js is invalid: ${error.message}`);
+}
 const homeGzip = gzip(homeHtml);
 const settingsGzip = gzip(settingsHtml);
+const i18nGzip = gzip(i18nSource);
 
 const output = `#pragma once
 
@@ -92,8 +100,13 @@ ${formatBytes(settingsGzip)}
 };
 constexpr size_t settingsGzipSize = sizeof(settingsGzip);
 
+constexpr uint8_t i18nGzip[] PROGMEM = {
+${formatBytes(i18nGzip)}
+};
+constexpr size_t i18nGzipSize = sizeof(i18nGzip);
+
 } // namespace PortalCompressed
 `;
 
 fs.writeFileSync(outputPath, output, 'utf8');
-console.log(`Generated PortalCompressed.h (${homeGzip.length} + ${settingsGzip.length} bytes).`);
+console.log(`Generated PortalCompressed.h (${homeGzip.length} + ${settingsGzip.length} + ${i18nGzip.length} bytes).`);

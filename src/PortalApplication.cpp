@@ -542,6 +542,9 @@ void PortalApplication::configureRoutes()
   webServer_.on("/settings", HTTP_GET, [this]() {
     sendSettingsPage();
   });
+  webServer_.on("/i18n.js", HTTP_GET, [this]() {
+    sendI18nScript();
+  });
   webServer_.on("/firmware.js", HTTP_GET, [this]() {
     sendFirmwareScript();
   });
@@ -613,6 +616,14 @@ void PortalApplication::sendSettingsPage()
     PortalCompressed::settingsGzipSize);
 }
 
+void PortalApplication::sendI18nScript()
+{
+  sendCompressedPage(
+    PortalCompressed::i18nGzip,
+    PortalCompressed::i18nGzipSize,
+    PSTR("application/javascript; charset=utf-8"));
+}
+
 void PortalApplication::sendFirmwareScript()
 {
   String script;
@@ -629,7 +640,8 @@ void PortalApplication::sendFirmwareScript()
 
 void PortalApplication::sendCompressedPage(
   const uint8_t *content,
-  size_t contentLength)
+  size_t contentLength,
+  PGM_P contentType)
 {
   webServer_.sendHeader("Content-Encoding", "gzip");
   webServer_.sendHeader("Cache-Control", "no-store, max-age=0");
@@ -637,7 +649,7 @@ void PortalApplication::sendCompressedPage(
   webServer_.sendHeader("X-Content-Type-Options", "nosniff");
   webServer_.send_P(
     200,
-    PSTR("text/html; charset=utf-8"),
+    contentType,
     reinterpret_cast<PGM_P>(content),
     contentLength);
 }

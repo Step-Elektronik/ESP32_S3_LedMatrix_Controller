@@ -14,7 +14,7 @@
 #endif
 
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "0.7.1"
+#define FIRMWARE_VERSION "0.8.0"
 #endif
 
 namespace AppConfig {

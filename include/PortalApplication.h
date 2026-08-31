@@ -35,10 +35,12 @@ private:
   void configureRoutes();
   void sendHomePage();
   void sendSettingsPage();
+  void sendI18nScript();
   void sendFirmwareScript();
   void sendCompressedPage(
     const uint8_t *content,
-    size_t contentLength);
+    size_t contentLength,
+    PGM_P contentType = PSTR("text/html; charset=utf-8"));
   void sendPortalRedirect();
   void sendSettingsJson();
   void sendWifiStatusJson();

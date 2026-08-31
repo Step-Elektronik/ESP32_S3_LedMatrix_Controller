@@ -31,6 +31,12 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
     button, a, input, select { -webkit-tap-highlight-color: transparent; }
     .shell { width: min(1180px,100%); margin: 0 auto; padding: 18px 18px 34px; }
     .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+    .top-actions { display: flex; align-items: center; gap: 9px; }
+    .top-actions .language-select {
+      width: auto; min-height: 46px; padding: 9px 34px 9px 12px;
+      color: #dce9ff; border: 1px solid rgba(255,255,255,.13); border-radius: 14px;
+      background: #102139; cursor: pointer;
+    }
     .brand { display: flex; align-items: center; gap: 12px; }
     .mark {
       width: 43px; height: 43px; display: grid; place-items: center; border-radius: 14px;
@@ -146,9 +152,16 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
     .status.ok { color: #70e0b6; } .status.error { color: #ff9aa6; }
     footer { display: flex; justify-content: center; margin-top: 24px; }
     .version { padding: 7px 11px; color: rgba(221,234,255,.60); font-size: 11px; font-weight: 700; letter-spacing: .045em; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; }
+    html[dir="rtl"] body { direction: rtl; }
+    html[dir="rtl"] .stage,
+    html[dir="rtl"] input[type="number"],
+    html[dir="rtl"] .coords { direction: ltr; }
+    html[dir="rtl"] .slider::after { left: auto; right: 3px; }
+    html[dir="rtl"] .switch input:checked + .slider::after { transform: translateX(-20px); }
     @media (max-width: 850px) { .layout { grid-template-columns: 1fr; } }
     @media (max-width: 540px) {
       .shell { padding: 14px 12px 28px; } .subtitle { display: none; }
+      .topbar { flex-wrap: wrap; } .top-actions { width: 100%; justify-content: flex-end; }
       .card-head, .preview-body, .editor { padding: 14px; }
       .toolbar { align-items: stretch; flex-wrap: wrap; } .toolbar .selection { flex-basis: 100%; } .toolbar .btn { flex: 1; padding-inline: 11px; }
       .stage-wrap { padding: 7px; } .stage-help { display: block; line-height: 1.55; }
@@ -164,9 +177,14 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
         <div class="mark">RGB</div>
         <div><h1>Panel İçerik Editörü</h1><p class="subtitle">Metin, saat, tarih ve sıcaklığı panel üzerinde konumlandırın</p></div>
       </div>
-      <a class="settings" href="/settings" aria-label="Ayarlar" title="Ayarlar">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.08 7.08 0 0 0-1.62-.94L14.4 2.8a.48.48 0 0 0-.48-.4h-3.84a.48.48 0 0 0-.48.4l-.36 2.54c-.58.24-1.12.56-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.72 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.31-.08.64-.08.94s.03.63.08.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.38.31.59.22l2.39-.96c.5.39 1.04.71 1.62.95l.36 2.54c.04.23.24.4.48.4h3.84c.24 0 .44-.17.48-.4l.36-2.54c.58-.24 1.12-.56 1.62-.95l2.39.96c.21.09.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.02-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"/></svg>
-      </a>
+      <div class="top-actions">
+        <select class="language-select" id="languageSelect" aria-label="Dil" title="Dil">
+          <option value="tr">Türkçe</option><option value="en">English</option><option value="de">Deutsch</option><option value="es">Español</option><option value="ar">العربية</option>
+        </select>
+        <a class="settings" href="/settings" aria-label="Ayarlar" title="Ayarlar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.08 7.08 0 0 0-1.62-.94L14.4 2.8a.48.48 0 0 0-.48-.4h-3.84a.48.48 0 0 0-.48.4l-.36 2.54c-.58.24-1.12.56-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.72 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.31-.08.64-.08.94s.03.63.08.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.38.31.59.22l2.39-.96c.5.39 1.04.71 1.62.95l.36 2.54c.04.23.24.4.48.4h3.84c.24 0 .44-.17.48-.4l.36-2.54c.58-.24 1.12-.56 1.62-.95l2.39.96c.21.09.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.02-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"/></svg>
+        </a>
+      </div>
     </header>
 
     <main class="layout">
@@ -293,14 +311,18 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
         </div>
       </aside>
     </main>
-    <footer><span class="version">STEP-RGB • Yazılım v)HTML"
+    <footer><span class="version">STEP-RGB • <span>Yazılım v</span>)HTML"
 FIRMWARE_VERSION
 R"HTML(</span></footer>
   </div>
 
+  <script src="/i18n.js"></script>
   <script>
     (() => {
       'use strict';
+      const I18n = window.StepRgbI18n;
+      I18n.init();
+      const t = (source, values) => I18n.t(source, values);
       const PW = 32, PH = 16;
       const state = { rows:1, columns:1, maxPerPanel:2, fonts:[], defaultFont:2, fontData:new Map(), fontLoads:new Map(), items:[], selectedPanel:0, selectedId:null, nextId:1, drag:null, temperatureValue:null };
       const $ = id => document.getElementById(id);
@@ -310,8 +332,10 @@ R"HTML(</span></footer>
       const boxNames = ['TextBox','ValueBox'];
       const directionArrows = ['←','→','↑','↓'];
 
-      function setStatus(message, kind='') {
-        status.textContent = message;
+      function setStatus(message, kind='', values={}) {
+        status.dataset.i18nSource = message;
+        status.dataset.i18nValues = JSON.stringify(values);
+        status.textContent = t(message, values);
         status.className = 'status' + (kind ? ' ' + kind : '');
       }
       function width() { return state.columns * PW; }
@@ -510,10 +534,10 @@ R"HTML(</span></footer>
           node.appendChild(canvas);
           renderPreviewNode(node,item,sx,sy);
           node.title = (item.kind===1
-            ? boxNames[item.kind]+' • '+(item.valueSource===0?'Modbus':'Dijital giriş')
+            ? boxNames[item.kind]+' • '+(item.valueSource===0?'Modbus':t('Dijital giriş'))
             : item.cycleEnabled
-            ? 'Döngü: '+cycleTypes(item).map(type=>typeNames[type]).join(' → ')
-            : typeNames[item.type]) + ' • '+fontName(item)+' • P' + (item.panel+1);
+            ? t('Döngü: {types}',{types:cycleTypes(item).map(type=>t(typeNames[type])).join(' → ')})
+            : t(typeNames[item.type])) + ' • '+fontName(item)+' • P' + (item.panel+1);
           if (item.kind===0 && item.cycleEnabled) {
             const badge = document.createElement('span');
             badge.className = 'cycle-badge'; badge.textContent = '↻';
@@ -529,11 +553,11 @@ R"HTML(</span></footer>
           layer.appendChild(node);
         });
         const count = panelCount(state.selectedPanel);
-        $('panelSelection').innerHTML = '<strong>Panel ' + (state.selectedPanel+1) + '</strong> seçili • ' + count + '/2 öğe';
+        $('panelSelection').innerHTML = '<strong>' + t('Panel {number}',{number:state.selectedPanel+1}) + '</strong> ' + t('seçili') + ' • ' + count + '/2 ' + t('öğe');
         addTextButton.disabled = count >= state.maxPerPanel;
         addValueButton.disabled = count >= state.maxPerPanel;
-        $('panelSize').textContent = state.columns + ' × ' + state.rows + ' panel';
-        $('logicalSize').textContent = width() + ' × ' + height() + ' piksel';
+        $('panelSize').textContent = t('{columns} × {rows} panel',{columns:state.columns,rows:state.rows});
+        $('logicalSize').textContent = t('{width} × {height} piksel',{width:width(),height:height()});
       }
 
       function startDrag(event,item,node) {
@@ -560,7 +584,7 @@ R"HTML(</span></footer>
         }
         state.drag.item.x=x; state.drag.item.y=y; state.drag.item.panel=target; state.selectedPanel=target;
         positionPreviewNode(state.drag.node,state.drag.item,sx,sy);
-        $('coordX').textContent=x; $('coordY').textContent=y; $('itemPanel').textContent='Panel '+(target+1);
+        $('coordX').textContent=x; $('coordY').textContent=y; $('itemPanel').textContent=t('Panel {number}',{number:target+1});
       }
       function stopDrag(event) {
         if (!state.drag || event.pointerId !== state.drag.pointerId) return;
@@ -598,13 +622,13 @@ R"HTML(</span></footer>
           valueSource:0, registerAddress:nextRegisterAddress(), valueType:0,
           counterDirection:0, temperatureFormat:0, font:state.defaultFont, currentValue:'0' };
         state.items.push(item); state.selectedId=item.id;
-        renderStage(); syncEditor(); setStatus('Yeni '+boxNames[kind]+' eklendi.');
+        renderStage(); syncEditor(); setStatus('Yeni {box} eklendi.','',{box:boxNames[kind]});
       }
       function deleteItem() {
         const item=selectedItem(); if (!item) return;
         const name=boxNames[item.kind];
         state.items=state.items.filter(value => value.id !== item.id); state.selectedId=null;
-        renderStage(); syncEditor(); setStatus(name+' silindi. Değişikliği uygulayabilirsiniz.');
+        renderStage(); syncEditor(); setStatus('{box} silindi. Değişikliği uygulayabilirsiniz.','',{box:name});
       }
 
       function syncEditor() {
@@ -612,10 +636,10 @@ R"HTML(</span></footer>
         editor.hidden=!item; placeholder.hidden=!!item;
         if (!item) return;
         const isValue=item.kind===1;
-        $('editor-title').textContent=boxNames[item.kind]+' Ayarları';
+        $('editor-title').textContent=t('{box} Ayarları',{box:boxNames[item.kind]});
         $('textBoxOptions').hidden=isValue;
         $('valueBoxOptions').hidden=!isValue;
-        $('deleteItem').textContent=boxNames[item.kind]+'\'u Sil';
+        $('deleteItem').textContent=t('{box} Sil',{box:boxNames[item.kind]});
         document.querySelectorAll('[data-type]').forEach(button => {
           const active=Number(button.dataset.type)===item.type;
           button.classList.toggle('active',active); button.setAttribute('aria-pressed',String(active));
@@ -647,9 +671,9 @@ R"HTML(</span></footer>
         $('scrollEnabled').checked=item.scrolling;
         $('scrollDirection').value=item.direction; $('scrollDirection').disabled=!item.scrolling;
         $('scrollSpeed').value=item.speed; $('scrollSpeed').disabled=!item.scrolling;
-        $('speedValue').textContent=item.speed+' px/sn';
+        $('speedValue').textContent=t('{speed} px/sn',{speed:item.speed});
         $('coordX').textContent=item.x; $('coordY').textContent=item.y;
-        $('itemPanel').textContent='Panel '+(item.panel+1);
+        $('itemPanel').textContent=t('Panel {number}',{number:item.panel+1});
       }
 
       document.querySelectorAll('[data-type]').forEach(button => button.addEventListener('click',() => {
@@ -708,15 +732,15 @@ R"HTML(</span></footer>
       });
       $('scrollEnabled').addEventListener('change',event => { const item=selectedItem(); if(item){ item.scrolling=event.target.checked; syncEditor(); renderStage(); } });
       $('scrollDirection').addEventListener('change',event => { const item=selectedItem(); if(item){ item.direction=Number(event.target.value); renderStage(); } });
-      $('scrollSpeed').addEventListener('input',event => { const item=selectedItem(); if(item){ item.speed=Number(event.target.value); $('speedValue').textContent=item.speed+' px/sn'; } });
+      $('scrollSpeed').addEventListener('input',event => { const item=selectedItem(); if(item){ item.speed=Number(event.target.value); $('speedValue').textContent=t('{speed} px/sn',{speed:item.speed}); } });
       addTextButton.addEventListener('click',()=>addItem(0));
       addValueButton.addEventListener('click',()=>addItem(1));
       $('deleteItem').addEventListener('click',deleteItem);
 
       async function request(url,options) {
         const response=await fetch(url,{cache:'no-store',...options});
-        const data=await response.json().catch(()=>({ok:false,error:'Geçersiz cihaz yanıtı.'}));
-        if(!response.ok || data.ok===false) throw new Error(data.error||'İşlem başarısız.');
+        const data=await response.json().catch(()=>({ok:false,message:'Geçersiz cihaz yanıtı.'}));
+        if(!response.ok || data.ok===false) throw new Error(I18n.server(data.message||data.error,'İşlem başarısız.'));
         return data;
       }
       async function loadContent() {
@@ -789,6 +813,16 @@ R"HTML(</span></footer>
       }
       saveButton.addEventListener('click',saveContent);
       window.addEventListener('resize',renderStage);
+      I18n.onChange(() => {
+        renderStage();
+        syncEditor();
+        const source=status.dataset.i18nSource;
+        if(source) {
+          let values={};
+          try { values=JSON.parse(status.dataset.i18nValues||'{}'); } catch (_) {}
+          status.textContent=t(source,values);
+        }
+      });
       setInterval(() => {
         if(state.drag) return;
         const rect=stage.getBoundingClientRect(), sx=rect.width/width(), sy=rect.height/height();
@@ -834,6 +868,11 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
     button, input, select { font: inherit; }
     .shell { width: min(920px, 100%); margin: 0 auto; padding: 20px 18px 42px; }
     .topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+    .topbar .language-select {
+      width: auto; min-width: 116px; height: 44px; margin-inline-start: auto; padding: 0 34px 0 12px;
+      color: #dce9ff; border: 1px solid rgba(255,255,255,.13); border-radius: 14px;
+      background: #102139; cursor: pointer;
+    }
     .back {
       width: 44px; height: 44px; display: grid; place-items: center;
       color: #dce9ff; text-decoration: none; font-size: 25px;
@@ -1032,8 +1071,16 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
     .status.show { opacity: 1; transform: translate(-50%, 0); }
     .status.error { background: #8f2734; }
     footer { margin-top: 18px; text-align: center; color: #7388a4; font-size: 12px; }
+    html[dir="rtl"] body { direction: rtl; }
+    html[dir="rtl"] .back { transform: scaleX(-1); }
+    html[dir="rtl"] input[type="number"],
+    html[dir="rtl"] input[type="time"],
+    html[dir="rtl"] input[type="date"],
+    html[dir="rtl"] code,
+    html[dir="rtl"] .connection-card svg { direction: ltr; }
     @media (max-width: 650px) {
       .shell { padding: 16px 12px 34px; }
+      .topbar { flex-wrap: wrap; }
       .tabs { grid-template-columns: 1fr; }
       .tab { min-height: 48px; }
       .grid, fieldset { grid-template-columns: 1fr; }
@@ -1052,6 +1099,9 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
     <div class="topbar">
       <a class="back" href="/" aria-label="Geri">&#8249;</a>
       <div><h1>Ayarlar</h1><p class="subtitle">STEP-RGB panel kontrolü</p></div>
+      <select class="language-select" id="languageSelect" aria-label="Dil" title="Dil">
+        <option value="tr">Türkçe</option><option value="en">English</option><option value="de">Deutsch</option><option value="es">Español</option><option value="ar">العربية</option>
+      </select>
     </div>
 
     <nav class="tabs" aria-label="Ayar grupları">
@@ -1167,7 +1217,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
 
     <section class="panel" id="alarm-section">
       <h2>Alarm Ayarları</h2>
-      <p class="note">Alarm tetiklendiğinde IO40 rölesi belirlenen süre boyunca açık kalır. En fazla 10 alarm oluşturabilirsiniz.</p>
+      <p class="note">Alarm tetiklendiğinde IO42 rölesi belirlenen süre boyunca açık kalır. En fazla 10 alarm oluşturabilirsiniz.</p>
       <form id="alarm-form">
         <div class="alarm-summary"><strong id="alarm-count">0 / 10 alarm</strong><span>Süre: 1–3600 saniye</span></div>
         <p class="alarm-empty" id="alarm-empty">Henüz alarm oluşturulmadı.</p>
@@ -1181,7 +1231,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
 
     <section class="panel" id="communication-section">
       <h2>Haberleşme Ayarları</h2>
-      <p class="note">RS485 Modbus RTU hattı RX IO18, TX IO17 ve DIR IO7 pinlerini kullanır. Değişiklikler kaydedildikten sonra cihaz otomatik yeniden başlar.</p>
+      <p class="note">RS485 Modbus RTU hattı RX IO39, TX IO40 ve DIR IO41 pinlerini kullanır. Değişiklikler kaydedildikten sonra cihaz otomatik yeniden başlar.</p>
       <form id="communication-form">
         <div class="grid">
           <div class="field">
@@ -1198,7 +1248,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
           </div>
           <div class="field">
             <label for="handshake">Handshake / yön kontrolü</label>
-            <select id="handshake" name="handshake"><option value="1">RS485 DIR kontrolü (IO7)</option><option value="0">Yok / otomatik yön donanımı</option></select>
+            <select id="handshake" name="handshake"><option value="1">RS485 DIR kontrolü (IO41)</option><option value="0">Yok / otomatik yön donanımı</option></select>
           </div>
           <p class="sleep-hint">ST3485 bağlantısında <strong>RS485 DIR kontrolü</strong> kullanılmalıdır. “Yok” seçeneği yalnızca kendi yönünü otomatik değiştiren RS485 dönüştürücüler içindir. Stop bit sabit olarak 1’dir.</p>
         </div>
@@ -1230,7 +1280,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
           </fieldset>
           <fieldset>
             <legend>Bağlanılacak ağ (STA)</legend>
-            <p class="sta-warning" role="note"><span aria-hidden="true">&#9888;</span><span><strong>Yalnızca 2.4 GHz:</strong> ESP32-S2, 5 GHz Wi-Fi ağlarına bağlanamaz. STA için 2.4 GHz yayın yapan bir SSID seçin.</span></p>
+            <p class="sta-warning" role="note"><span aria-hidden="true">&#9888;</span><span><strong>Yalnızca 2.4 GHz:</strong> ESP32-S3, 5 GHz Wi-Fi ağlarına bağlanamaz. STA için 2.4 GHz yayın yapan bir SSID seçin.</span></p>
             <div class="field"><label for="staSsid">SSID</label><input id="staSsid" name="staSsid" maxlength="32" placeholder="Boş bırakılırsa devre dışı"></div>
             <div class="field"><label for="staPassword">Parola</label><input id="staPassword" name="staPassword" type="password" maxlength="63" placeholder="Açık ağ için boş bırakılabilir"></div>
           </fieldset>
@@ -1259,12 +1309,16 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
       </form>
     </section>
 
-    <footer>Yazılım v)HTML"
+    <footer><span>Yazılım v</span>)HTML"
 FIRMWARE_VERSION
 R"HTML(</footer>
   </div>
   <div class="status" id="status" role="status" aria-live="polite"></div>
+  <script src="/i18n.js"></script>
   <script>
+    const I18n = window.StepRgbI18n;
+    I18n.init();
+    const t = (source, values) => I18n.t(source, values);
     const byId = id => document.getElementById(id);
     const statusBox = byId('status');
     let statusTimer;
@@ -1272,7 +1326,7 @@ R"HTML(</footer>
 
     function showStatus(message, error = false) {
       clearTimeout(statusTimer);
-      statusBox.textContent = message;
+      statusBox.textContent = t(message);
       statusBox.className = 'status show' + (error ? ' error' : '');
       statusTimer = setTimeout(() => statusBox.className = 'status', 4500);
     }
@@ -1287,14 +1341,14 @@ R"HTML(</footer>
     function refreshAlarmList() {
       const cards = [...document.querySelectorAll('.alarm-card')];
       cards.forEach((card, index) => {
-        card.querySelector('.alarm-title').textContent = `Alarm ${index + 1}`;
+        card.querySelector('.alarm-title').textContent = t('Alarm {number}', {number:index + 1});
         card.querySelector('.alarm-time').name = `alarmTime${index}`;
         card.querySelector('.alarm-duration').name = `alarmDuration${index}`;
         card.querySelector('.alarm-days').name = `alarmDayMode${index}`;
         card.querySelector('.alarm-day-mask').name = `alarmDayMask${index}`;
         updateAlarmDayControls(card);
       });
-      byId('alarm-count').textContent = `${cards.length} / ${maximumAlarms} alarm`;
+      byId('alarm-count').textContent = t('{count} / {maximum} alarm', {count:cards.length,maximum:maximumAlarms});
       byId('alarm-empty').hidden = cards.length !== 0;
       byId('add-alarm').disabled = cards.length >= maximumAlarms;
     }
@@ -1302,7 +1356,7 @@ R"HTML(</footer>
     function addAlarm(item = {}) {
       const list = byId('alarm-list');
       if (list.children.length >= maximumAlarms) {
-        showStatus(`En fazla ${maximumAlarms} alarm oluşturabilirsiniz.`, true);
+        showStatus(t('En fazla {maximum} alarm oluşturabilirsiniz.', {maximum:maximumAlarms}), true);
         return;
       }
 
@@ -1362,6 +1416,7 @@ R"HTML(</footer>
         refreshAlarmList();
       });
       list.appendChild(card);
+      I18n.localize(card);
       refreshAlarmList();
     }
 
@@ -1420,8 +1475,8 @@ R"HTML(</footer>
 
     async function request(url, options = {}) {
       const response = await fetch(url, {cache: 'no-store', ...options});
-      const data = await response.json();
-      if (!response.ok || ('ok' in data && !data.ok)) throw new Error(data.message || 'İşlem başarısız.');
+      const data = await response.json().catch(() => ({ok:false,message:'Geçersiz cihaz yanıtı.'}));
+      if (!response.ok || ('ok' in data && !data.ok)) throw new Error(I18n.server(data.message, 'İşlem başarısız.'));
       return data;
     }
 
@@ -1447,21 +1502,21 @@ R"HTML(</footer>
 
     function wifiRetryText() {
       return wifiRetrySeconds > 0
-        ? ` Sonraki denemeye ${wifiRetrySeconds} saniye kaldı.`
-        : ' Yeni bağlantı denemesi başlatılıyor…';
+        ? ' ' + t('Sonraki denemeye {seconds} saniye kaldı.', {seconds:wifiRetrySeconds})
+        : ' ' + t('Yeni bağlantı denemesi başlatılıyor…');
     }
 
     function updateWifiStatusDetail() {
       if (!wifiStatusData) return;
       const data = wifiStatusData;
       const state = wifiStateLabels[data.state] ? data.state : 'waiting';
-      let detail = 'Bir sonraki otomatik bağlantı denemesi bekleniyor.' + wifiRetryText();
-      if (state === 'disabled') detail = 'Bağlanılacak bir STA ağı kaydedilmemiş.';
-      if (state === 'paused') detail = 'Yerel AP arayüzüne bir cihaz bağlı olduğu için yeni STA denemeleri bekletiliyor.';
-      if (state === 'connecting') detail = `“${data.ssid}” ağına bağlanılıyor…`;
-      if (state === 'connected') detail = `“${data.ssid}” ağına bağlandı.`;
+      let detail = t('Bir sonraki otomatik bağlantı denemesi bekleniyor.') + wifiRetryText();
+      if (state === 'disabled') detail = t('Bağlanılacak bir STA ağı kaydedilmemiş.');
+      if (state === 'paused') detail = t('Yerel AP arayüzüne bir cihaz bağlı olduğu için yeni STA denemeleri bekletiliyor.');
+      if (state === 'connecting') detail = t('“{ssid}” ağına bağlanılıyor…', {ssid:data.ssid});
+      if (state === 'connected') detail = t('“{ssid}” ağına bağlandı.', {ssid:data.ssid});
       if (state === 'failed') {
-        detail = wifiFailureLabels[data.reason] || 'Bağlantı kurulamadı.';
+        detail = t(wifiFailureLabels[data.reason] || 'Bağlantı kurulamadı.');
         if (data.reason !== 'status_unavailable') detail += wifiRetryText();
       }
       byId('wifi-state-detail').textContent = detail;
@@ -1473,7 +1528,7 @@ R"HTML(</footer>
       wifiStatusData = data;
       wifiRetrySeconds = Math.max(0, Number(data.retryInSeconds) || 0);
       box.dataset.state = state;
-      byId('wifi-state-label').textContent = wifiStateLabels[state];
+      byId('wifi-state-label').textContent = t(wifiStateLabels[state]);
       updateWifiStatusDetail();
 
       const ip = byId('wifi-ip');
@@ -1490,7 +1545,7 @@ R"HTML(</footer>
         const fill = byId('wifi-signal-fill');
         fill.style.width = `${quality}%`;
         fill.style.backgroundColor = quality >= 70 ? '#32ca70' : quality >= 40 ? '#f0ad3d' : '#ef4c5b';
-        byId('wifi-signal-text').textContent = `Sinyal ${quality}% (${rssi} dBm)`;
+        byId('wifi-signal-text').textContent = t('Sinyal {quality}% ({rssi} dBm)', {quality,rssi});
       }
     }
 
@@ -1550,7 +1605,7 @@ R"HTML(</footer>
             Number(card.querySelector('.alarm-days').value) === 2
             && alarmDayMask(card) === 0);
           if (invalidCustomDays) {
-            throw new Error('Özel alarm için en az bir gün seçilmelidir.');
+            throw new Error(t('Özel alarm için en az bir gün seçilmelidir.'));
           }
         }
         const body = new URLSearchParams(new FormData(event.currentTarget));
@@ -1565,7 +1620,7 @@ R"HTML(</footer>
           });
         }
         const result = await request(endpoint, {method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body});
-        showStatus(result.message);
+        showStatus(I18n.server(result.message, 'İşlem tamamlandı.'));
       } catch (error) { showStatus(error.message, true); }
     }
 
@@ -1581,7 +1636,7 @@ R"HTML(</footer>
     const firmwareSubmit = byId('firmware-submit');
 
     function firmwareFileSize(bytes) {
-      if (bytes < 1024) return `${bytes} bayt`;
+      if (bytes < 1024) return `${bytes} ${t('bayt')}`;
       if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
       return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
     }
@@ -1592,7 +1647,7 @@ R"HTML(</footer>
       byId('firmware-progress-bar').style.width = `${value}%`;
       byId('firmware-progress-value').value = `${value}%`;
       byId('firmware-progress-track').setAttribute('aria-valuenow', String(value));
-      byId('firmware-progress-text').textContent = message;
+      byId('firmware-progress-text').textContent = t(message);
     }
 
     function validateFirmwareFile(showError = false) {
@@ -1601,11 +1656,11 @@ R"HTML(</footer>
       firmwareSubmit.disabled = firmwareUploadActive || !valid;
 
       if (!file) {
-        byId('firmware-file-meta').innerHTML = '<strong>Gerekli dosya adı:</strong> firmware.bin';
+        byId('firmware-file-meta').innerHTML = '<strong>' + t('Gerekli dosya adı:') + '</strong> firmware.bin';
       } else if (valid) {
         byId('firmware-file-meta').textContent = `${file.name} • ${firmwareFileSize(file.size)}`;
       } else {
-        byId('firmware-file-meta').innerHTML = '<strong>Geçersiz dosya.</strong> Dosya adı tam olarak firmware.bin olmalıdır.';
+        byId('firmware-file-meta').innerHTML = '<strong>' + t('Geçersiz dosya.') + '</strong> ' + t('Dosya adı tam olarak firmware.bin olmalıdır.');
         if (showError) showStatus('Dosya adı tam olarak firmware.bin olmalıdır.', true);
       }
       return valid;
@@ -1636,15 +1691,15 @@ R"HTML(</footer>
       xhr.addEventListener('load', () => {
         const result = xhr.response || {};
         if (xhr.status >= 200 && xhr.status < 300 && result.ok) {
-          setFirmwareProgress(100, result.message || 'Güncelleme tamamlandı. Cihaz yeniden başlatılıyor.');
-          showStatus(result.message || 'Güncelleme tamamlandı.');
+          setFirmwareProgress(100, I18n.server(result.message, 'Güncelleme tamamlandı. Cihaz yeniden başlatılıyor.'));
+          showStatus(I18n.server(result.message, 'Güncelleme tamamlandı.'));
           return;
         }
 
         firmwareUploadActive = false;
         firmwareFile.disabled = false;
         validateFirmwareFile();
-        const message = result.message || 'Firmware güncellenemedi.';
+        const message = I18n.server(result.message, 'Firmware güncellenemedi.');
         setFirmwareProgress(0, message);
         showStatus(message, true);
       });
@@ -1667,7 +1722,7 @@ R"HTML(</footer>
     document.querySelectorAll('[data-color]').forEach(button => button.addEventListener('click', async () => {
       try {
         const result = await request('/api/panel/test?color=' + button.dataset.color, {method: 'POST'});
-        showStatus(result.message);
+        showStatus(I18n.server(result.message, 'İşlem tamamlandı.'));
       } catch (error) { showStatus(error.message, true); }
     }));
 
@@ -1678,8 +1733,14 @@ R"HTML(</footer>
       byId('time').value = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     });
 
+    refreshAlarmList();
     loadSettings();
     loadWifiStatus();
+    I18n.onChange(() => {
+      refreshAlarmList();
+      if (wifiStatusData) renderWifiStatus(wifiStatusData);
+      validateFirmwareFile();
+    });
     setInterval(loadWifiStatus, 2000);
     setInterval(updateWifiCountdown, 1000);
   </script>
