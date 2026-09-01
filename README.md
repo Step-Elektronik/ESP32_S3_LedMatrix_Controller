@@ -49,32 +49,9 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 
 ## Sistem mimarisi
 
-```mermaid
-flowchart LR
-    Browser[Web tarayıcısı] --> Portal[HTTP portalı]
-    Portal --> Settings[NVS / Preferences]
-    Portal --> OTA[OTA güncelleme]
+![ESP32-S3 RGB LED Matrix Controller sistem mimarisi](docs/system-architecture.svg)
 
-    DS3231 --> Clock[Saat servisi]
-    SHT40 --> Temperature[Sıcaklık servisi]
-    RS485[RS485 / Modbus RTU] --> ValueBox[ValueBox servisi]
-    Input[GPIO21 dijital giriş] --> ValueBox
-
-    Clock --> Content[Panel içerik motoru]
-    Temperature --> Content
-    ValueBox --> Content
-    Settings --> Content
-    Content --> DMA[LCD_CAM / GDMA]
-    DMA --> Panel[HUB75 RGB paneller]
-
-    Clock --> Alarm[Alarm servisi]
-    Settings --> Alarm
-    Alarm --> Relay[GPIO42 röle çıkışı]
-
-    Clock --> Sleep[Panel uyku servisi]
-    Settings --> Sleep
-    Sleep --> Panel
-```
+Görsel ayrı bir SVG dosyası olarak tutulur: [`docs/system-architecture.svg`](docs/system-architecture.svg). Böylece GitHub görünümü Mermaid sürümüne veya rich-display desteğine bağlı değildir.
 
 Tüm uygulama servisleri Arduino `loop()` içinde işbirlikçi biçimde güncellenir. HUB75 taraması DMA tarafından yürütüldüğü için ağ, Modbus, sensör ve içerik işlemleri panel yenilemesini doğrudan durdurmaz.
 
