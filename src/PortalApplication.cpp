@@ -1062,19 +1062,23 @@ void PortalApplication::saveNetworkSettings()
 
 void PortalApplication::saveCommunicationSettings()
 {
+  String slaveAddressText;
   String baudRateText;
   String dataBitsText;
   String parityText;
   String handshakeText;
   CommunicationSettings communication{};
   uint8_t dataBits = 0;
+  uint8_t slaveAddress = 0;
   uint8_t parity = 0;
   uint8_t handshake = 0;
 
-  if (!postValue("baudRate", baudRateText)
+  if (!postValue("slaveAddress", slaveAddressText)
+      || !postValue("baudRate", baudRateText)
       || !postValue("dataBits", dataBitsText)
       || !postValue("parity", parityText)
       || !postValue("handshake", handshakeText)
+      || !parseUnsignedByte(slaveAddressText, 1, 247, slaveAddress)
       || !parseUnsigned32(
         baudRateText,
         4800,
@@ -1095,6 +1099,7 @@ void PortalApplication::saveCommunicationSettings()
     return;
   }
 
+  communication.slaveAddress = slaveAddress;
   communication.dataBits = dataBits;
   communication.parity = static_cast<UartParity>(parity);
   communication.handshake = static_cast<UartHandshake>(handshake);
@@ -1206,6 +1211,8 @@ String PortalApplication::buildSettingsJson() const
   json += static_cast<uint8_t>(panel.connectionStyle);
   json += F("},\"communication\":{\"baudRate\":");
   json += communication.baudRate;
+  json += F(",\"slaveAddress\":");
+  json += communication.slaveAddress;
   json += F(",\"dataBits\":");
   json += communication.dataBits;
   json += F(",\"parity\":");

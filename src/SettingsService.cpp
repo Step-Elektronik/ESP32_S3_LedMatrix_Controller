@@ -458,6 +458,9 @@ bool SettingsService::begin()
   communication_.baudRate = preferences_.getUInt(
     "uart_baud",
     communication_.baudRate);
+  communication_.slaveAddress = preferences_.getUChar(
+    "modbus_id",
+    communication_.slaveAddress);
   communication_.dataBits = preferences_.getUChar(
     "uart_bits",
     communication_.dataBits);
@@ -729,7 +732,8 @@ bool SettingsService::saveCommunication(
   }
 
   const bool stored =
-    preferences_.putUInt("uart_baud", settings.baudRate) == 4
+    preferences_.putUChar("modbus_id", settings.slaveAddress) == 1
+    && preferences_.putUInt("uart_baud", settings.baudRate) == 4
     && preferences_.putUChar("uart_bits", settings.dataBits) == 1
     && preferences_.putUChar(
       "uart_parity",
@@ -879,6 +883,10 @@ bool SettingsService::validateCommunication(
   const CommunicationSettings &settings,
   String &error)
 {
+  if (settings.slaveAddress < 1 || settings.slaveAddress > 247) {
+    error = "Modbus Slave ID 1-247 araliginda olmalidir.";
+    return false;
+  }
   const bool baudRateValid = settings.baudRate == 4800
     || settings.baudRate == 9600
     || settings.baudRate == 19200

@@ -336,7 +336,25 @@ def custom_degree(source: Glyph) -> Glyph:
     return Glyph(pixels, advance, source.x_offset, source.y_offset)
 
 
-def decorate_bitmap_font(glyphs: dict[str, Glyph]) -> list[Glyph]:
+def bitmap_font_degree(font_name: str, source: Glyph) -> Glyph:
+    if font_name == "GohuFont6x11":
+        # Nearest-neighbour reduction of this font's 5x5 "o" to 3x3 drops
+        # the right and bottom arcs. Keep a symmetric, top-aligned 4x4 ring.
+        return Glyph(
+            [
+                [False, True, True, False],
+                [True, False, False, True],
+                [True, False, False, True],
+                [False, True, True, False],
+            ],
+            6,
+            1,
+            -9,
+        )
+    return custom_degree(source)
+
+
+def decorate_bitmap_font(font_name: str, glyphs: dict[str, Glyph]) -> list[Glyph]:
     dot = trim_pixels(glyphs["."].pixels)
     comma = trim_pixels(glyphs[","].pixels)
     generated: list[Glyph] = []
@@ -372,7 +390,7 @@ def decorate_bitmap_font(glyphs: dict[str, Glyph]) -> list[Glyph]:
             add_mark(points, mark, mark_left, mark_top)
         generated.append(glyph_from_points(points, base.x_advance))
 
-    generated.append(custom_degree(glyphs["o"]))
+    generated.append(bitmap_font_degree(font_name, glyphs["o"]))
     return generated
 
 
@@ -686,7 +704,7 @@ def main() -> None:
             continue
         header = font_directory / BITMAP_FONT_HEADERS[font_name]
         source_glyphs = parse_gfx_font(header, font_name)
-        generated[font_name] = decorate_bitmap_font(source_glyphs)
+        generated[font_name] = decorate_bitmap_font(font_name, source_glyphs)
 
     validate_extensions(generated)
     output = generate_header(generated)

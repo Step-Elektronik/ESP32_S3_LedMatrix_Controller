@@ -14,7 +14,7 @@
 #endif
 
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "0.8.0"
+#define FIRMWARE_VERSION "0.9.0"
 #endif
 
 namespace AppConfig {
@@ -86,7 +86,8 @@ namespace Modbus {
 constexpr int8_t rxPin = 39;
 constexpr int8_t txPin = 40;
 constexpr int8_t directionPin = 41;
-constexpr uint8_t slaveAddress = 1;
+constexpr uint8_t defaultSlaveAddress = 1;
+constexpr uint32_t defaultBaudRate = 115200;
 constexpr uint8_t maximumReadRegisters = 64;
 } // namespace Modbus
 

@@ -268,7 +268,7 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
               </div>
             </div>
             <div id="modbusOptions">
-              <p class="cycle-note">Slave ID: 1 • 9600 baud • 8N1 • Holding register. IEEE-754 float seçilen adresten başlayarak iki register kullanır (yüksek word önce).</p>
+              <p class="cycle-note">Slave ID ve seri iletişim seçenekleri Haberleşme Ayarları bölümünden değiştirilebilir. IEEE-754 float seçilen adresten başlayarak iki register kullanır (yüksek word önce).</p>
               <div class="two-col">
                 <div class="field"><label for="registerAddress">Register adresi</label><input id="registerAddress" type="number" min="0" max="65535" value="0" inputmode="numeric"></div>
                 <div class="field"><label for="valueType">Değer tipi</label><select id="valueType"><option value="0">Signed integer (16-bit)</option><option value="1">Float (IEEE-754)</option></select></div>
@@ -324,7 +324,7 @@ R"HTML(</span></footer>
       I18n.init();
       const t = (source, values) => I18n.t(source, values);
       const PW = 32, PH = 16;
-      const state = { rows:1, columns:1, maxPerPanel:2, fonts:[], defaultFont:2, fontData:new Map(), fontLoads:new Map(), items:[], selectedPanel:0, selectedId:null, nextId:1, drag:null, temperatureValue:null };
+      const state = { rows:1, columns:1, maxPerPanel:2, fonts:[], defaultFont:4, fontData:new Map(), fontLoads:new Map(), items:[], selectedPanel:0, selectedId:null, nextId:1, drag:null, temperatureValue:null };
       const $ = id => document.getElementById(id);
       const stage = $('stage'), grid = $('panelGrid'), layer = $('itemLayer');
       const status = $('status'), addTextButton = $('addTextBox'), addValueButton = $('addValueBox'), saveButton = $('saveAll');
@@ -372,7 +372,7 @@ R"HTML(</span></footer>
       function liveText(item) {
         return item.kind===1 ? (item.currentValue||formatInitialValue(item)) : textForType(item,activeType(item));
       }
-      function fontName(item) { return state.fonts[item.font] || state.fonts[state.defaultFont] || 'Apple6x10'; }
+      function fontName(item) { return state.fonts[item.font] || state.fonts[state.defaultFont] || 'GohuFont6x11'; }
       const turkishGlyphCodes = {'Ç':0x7F,'Ğ':0x80,'İ':0x81,'Ö':0x82,'Ş':0x83,'Ü':0x84,'ç':0x85,'ğ':0x86,'ı':0x87,'ö':0x88,'ş':0x89,'ü':0x8A,'°':0x8B};
       function encodedFontCodes(item,text) {
         const codes=[];
@@ -1235,6 +1235,10 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
       <form id="communication-form">
         <div class="grid">
           <div class="field">
+            <label for="slaveAddress">Slave ID</label>
+            <input id="slaveAddress" name="slaveAddress" type="number" min="1" max="247" step="1" inputmode="numeric" required>
+          </div>
+          <div class="field">
             <label for="baudRate">Baudrate</label>
             <select id="baudRate" name="baudRate"><option value="4800">4800</option><option value="9600">9600</option><option value="19200">19200</option><option value="57600">57600</option><option value="115200">115200</option></select>
           </div>
@@ -1585,6 +1589,7 @@ R"HTML(</footer>
         byId('sleepEnd').value = data.clock.sleepEnd;
         byId('sleepDayMode').value = data.clock.sleepDayMode;
         renderAlarms(data.alarms);
+        byId('slaveAddress').value = data.communication.slaveAddress;
         byId('baudRate').value = data.communication.baudRate;
         byId('dataBits').value = data.communication.dataBits;
         byId('parity').value = data.communication.parity;

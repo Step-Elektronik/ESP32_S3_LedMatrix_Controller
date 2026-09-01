@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "AlarmModel.h"
+#include "AppConfig.h"
 #include "ContentModel.h"
 
 enum class PanelConnectionStyle : uint8_t {
@@ -50,7 +51,8 @@ enum class UartHandshake : uint8_t {
 };
 
 struct CommunicationSettings {
-  uint32_t baudRate = 9600;
+  uint8_t slaveAddress = AppConfig::Modbus::defaultSlaveAddress;
+  uint32_t baudRate = AppConfig::Modbus::defaultBaudRate;
   uint8_t dataBits = 8;
   UartParity parity = UartParity::none;
   UartHandshake handshake = UartHandshake::rs485Direction;
@@ -106,5 +108,4 @@ private:
   ContentSettings content_;
   bool ready_ = false;
 };
-
 

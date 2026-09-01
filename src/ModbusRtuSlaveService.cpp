@@ -96,7 +96,7 @@ void ModbusRtuSlaveService::begin()
   ready_ = true;
   Serial.printf(
     "Modbus RTU slave %u ready: %lu %u%s1, handshake=%s (RX=%d, TX=%d, DIR=%d).\n",
-    AppConfig::Modbus::slaveAddress,
+    communication.slaveAddress,
     static_cast<unsigned long>(communication.baudRate),
     communication.dataBits,
     parityName(communication.parity),
@@ -145,7 +145,7 @@ void ModbusRtuSlaveService::processFrame()
   }
 
   const uint8_t address = receiveBuffer_[0];
-  if (address != AppConfig::Modbus::slaveAddress && address != 0) {
+  if (address != settings_.communication().slaveAddress && address != 0) {
     return;
   }
   const bool broadcast = address == 0;
@@ -186,7 +186,7 @@ void ModbusRtuSlaveService::processReadHoldingRegisters(bool broadcast)
   }
 
   uint8_t response[3 + AppConfig::Modbus::maximumReadRegisters * 2] = {};
-  response[0] = AppConfig::Modbus::slaveAddress;
+  response[0] = settings_.communication().slaveAddress;
   response[1] = readHoldingRegistersFunction;
   response[2] = static_cast<uint8_t>(quantity * 2);
   for (uint16_t index = 0; index < quantity; ++index) {
@@ -263,7 +263,7 @@ void ModbusRtuSlaveService::processWriteMultipleRegisters(bool broadcast)
 
   if (!broadcast) {
     uint8_t response[6] = {
-      AppConfig::Modbus::slaveAddress,
+      settings_.communication().slaveAddress,
       writeMultipleRegistersFunction,
       receiveBuffer_[2],
       receiveBuffer_[3],
@@ -279,7 +279,7 @@ void ModbusRtuSlaveService::sendException(
   uint8_t exceptionCode)
 {
   const uint8_t response[3] = {
-    AppConfig::Modbus::slaveAddress,
+    settings_.communication().slaveAddress,
     static_cast<uint8_t>(functionCode | 0x80U),
     exceptionCode
   };
@@ -327,5 +327,4 @@ uint16_t ModbusRtuSlaveService::calculateCrc(
   }
   return crc;
 }
-
 
