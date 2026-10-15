@@ -118,6 +118,9 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
     input:focus, select:focus { border-color: #4497ff; box-shadow: 0 0 0 3px rgba(35,129,255,.14); }
     input:disabled, select:disabled { opacity: .4; }
     .segments { display: grid; grid-template-columns: repeat(4,1fr); gap: 7px; }
+    .segments.type-segments { grid-template-columns: repeat(3,1fr); }
+    .segment:disabled { opacity: .4; cursor: not-allowed; }
+    .cycle-choice input:disabled + span { opacity: .4; cursor: not-allowed; }
     .segments.value-source-segments { grid-template-columns: repeat(2,1fr); }
     .segment { min-height: 40px; padding: 8px; color: #9cb0ca; cursor: pointer; font-weight: 800; border: 1px solid rgba(255,255,255,.10); border-radius: 10px; background: rgba(255,255,255,.045); }
     .segment.active { color: white; border-color: #3d91ff; background: rgba(41,127,255,.20); }
@@ -220,46 +223,55 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
           <div id="textBoxOptions">
           <div class="field">
             <span class="field-title">Veri türü</span>
-            <div class="segments" id="typeSegments">
+            <div class="segments type-segments" id="typeSegments">
               <button class="segment" type="button" data-type="0">Yazı</button>
               <button class="segment" type="button" data-type="1">Saat</button>
               <button class="segment" type="button" data-type="2">Tarih</button>
               <button class="segment" type="button" data-type="3">Sıcaklık</button>
+              <button class="segment" type="button" data-type="4">Nem</button>
             </div>
+            <div class="card-note" id="humidityNote" hidden></div>
           </div>
           <div class="field switch-row">
             <div><span class="field-title">İçerik döngüsü</span><div class="card-note">Birden fazla bilgiyi aynı TextBox'ta sırayla gösterir</div></div>
             <label class="switch"><input id="cycleEnabled" type="checkbox"><span class="slider"></span></label>
           </div>
           <div class="cycle-options" id="cycleOptions" hidden>
-            <p class="cycle-note">İşaretlenen bilgiler Yazı → Saat → Tarih → Sıcaklık sırasıyla gösterilir. Kayar yazı açıksa içerik tam turunu tamamladıktan sonra değişir.</p>
+            <p class="cycle-note">İşaretlenen bilgiler Yazı → Saat → Tarih → Sıcaklık → Nem sırasıyla gösterilir. Kayar yazı açıksa içerik tam turunu tamamladıktan sonra değişir.</p>
             <div class="cycle-choices">
               <label class="cycle-choice"><input type="checkbox" data-cycle-type="0"><span>Yazı</span></label>
               <label class="cycle-choice"><input type="checkbox" data-cycle-type="1"><span>Saat</span></label>
               <label class="cycle-choice"><input type="checkbox" data-cycle-type="2"><span>Tarih</span></label>
               <label class="cycle-choice"><input type="checkbox" data-cycle-type="3"><span>Sıcaklık</span></label>
+              <label class="cycle-choice"><input type="checkbox" data-cycle-type="4"><span>Nem</span></label>
             </div>
             <div class="field" style="margin-bottom:0"><label for="cycleInterval">Değişim sıklığı (saniye)</label><input id="cycleInterval" type="number" min="1" max="3600" value="5" inputmode="numeric"></div>
           </div>
           <div class="field">
             <label for="textValue">Yazdırılacak metin</label>
             <input id="textValue" type="text" maxlength="40" autocomplete="off" placeholder="Metninizi yazın">
+            <div class="card-note">Türkçe, Almanca ve İspanyolca harfler ile ° işareti panelde gösterilir; ß “ss” olarak yazılır. Diğer karakterler “?” olarak görünür.</div>
           </div>
           <div class="field" id="temperatureFormatOptions" hidden>
-            <label for="temperatureFormat">Sıcaklık gösterimi</label>
+            <label for="temperatureFormat">Sıcaklık ve nem gösterimi</label>
             <select id="temperatureFormat">
-              <option value="0">Float — bir ondalık (23.5°C)</option>
-              <option value="1">Integer — tam sayı (23.5 → 24°C)</option>
+              <option value="0">Ondalıklı — bir basamak (23.5°C, 45.3%)</option>
+              <option value="1">Tam sayı — yuvarlanmış (24°C, 45%)</option>
             </select>
-            <div class="card-note">Integer seçiminde en yakın tam sayıya yuvarlanır; 0.5 ve üzeri bir üst değere çıkar.</div>
+            <div class="card-note">Tam sayı seçiminde en yakın tam sayıya yuvarlanır; 0.5 ve üzeri bir üst değere çıkar.</div>
           </div>
           </div>
           <div id="valueBoxOptions" hidden>
             <div class="field">
               <label for="initialValue">Başlangıç değeri</label>
               <input id="initialValue" type="number" step="1" value="0" inputmode="decimal">
-              <div class="card-note">Cihaz her açıldığında ValueBox bu değerden başlar.</div>
+              <div class="card-note">Cihaz her açıldığında ValueBox bu değerden başlar. Tasarım kaydedildiğinde veri kaynağı ve başlangıç değeri değişmeyen kutular mevcut değerini korur.</div>
             </div>
+            <div class="two-col">
+              <div class="field"><label for="valueDecimals">Ondalık basamak</label><select id="valueDecimals"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
+              <div class="field"><label for="valueSuffix">Birim / son ek</label><input id="valueSuffix" type="text" maxlength="15" autocomplete="off" placeholder="°C, bar, kg"></div>
+            </div>
+            <p class="cycle-note">Float değer bu basamak sayısına yuvarlanır. Integer değerde ondalık nokta kaydırılır; örneğin 1234 ve 2 basamak 12.34 olarak gösterilir.</p>
             <div class="field">
               <span class="field-title">Veri kaynağı</span>
               <div class="segments value-source-segments">
@@ -276,7 +288,7 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
             </div>
             <div id="digitalInputOptions" hidden>
               <div class="field"><label for="counterDirection">Sayaç yönü</label><select id="counterDirection"><option value="0">Yukarı sayıcı</option><option value="1">Aşağı sayıcı</option></select></div>
-              <p class="cycle-note">IO21 dahili pull-down ile LOW seviyesinde bekler. Debounce sonrasındaki LOW → HIGH yükselen kenarında değer artırılır veya azaltılır. Negatif değerler gösterilebilir.</p>
+              <p class="cycle-note">IO12 dahili pull-down ile LOW seviyesinde bekler. Debounce sonrasındaki LOW → HIGH yükselen kenarında değer artırılır veya azaltılır. Negatif değerler gösterilebilir.</p>
             </div>
           </div>
           <div class="field">
@@ -287,6 +299,11 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
           <div class="field">
             <label for="itemRotation">Kutu yönü</label>
             <select id="itemRotation"><option value="0">0°</option><option value="1">90° saat yönü</option><option value="2">180°</option><option value="3">270° saat yönü</option></select>
+          </div>
+          <div class="field">
+            <label for="itemScrollArea">Gösterim alanı</label>
+            <select id="itemScrollArea"><option value="0">Yalnızca kendi paneli</option><option value="1">Tüm ekran</option></select>
+            <div class="card-note">Kutu bu alanın dışında kırpılır; kayar yazı bu alanın kenarlarında döner.</div>
           </div>
           <div class="field">
             <span class="field-title">Renk</span>
@@ -324,11 +341,13 @@ R"HTML(</span></footer>
       I18n.init();
       const t = (source, values) => I18n.t(source, values);
       const PW = 32, PH = 16;
-      const state = { rows:1, columns:1, maxPerPanel:2, fonts:[], defaultFont:4, fontData:new Map(), fontLoads:new Map(), items:[], selectedPanel:0, selectedId:null, nextId:1, drag:null, temperatureValue:null };
+      const state = { rows:1, columns:1, maxPerPanel:2, fonts:[], defaultFont:4, fontData:new Map(), fontLoads:new Map(), items:[], selectedPanel:0, selectedId:null, nextId:1, drag:null, temperatureValue:null, humidityValue:null,
+        sensor:{type:1, name:'TMP112', humidity:false, missingText:'TMP?'} };
       const $ = id => document.getElementById(id);
       const stage = $('stage'), grid = $('panelGrid'), layer = $('itemLayer');
       const status = $('status'), addTextButton = $('addTextBox'), addValueButton = $('addValueBox'), saveButton = $('saveAll');
-      const typeNames = ['Yazı','Saat','Tarih','Sıcaklık'];
+      const typeNames = ['Yazı','Saat','Tarih','Sıcaklık','Nem'];
+      const humidityMask = 1<<4;
       const boxNames = ['TextBox','ValueBox'];
       const directionArrows = ['←','→','↑','↓'];
 
@@ -344,7 +363,8 @@ R"HTML(</span></footer>
       function selectedItem() { return state.items.find(item => item.id === state.selectedId) || null; }
       function toHex(value) { return Number(value).toString(16).padStart(2,'0'); }
       function itemColor(item) { return '#' + toHex(item.red) + toHex(item.green) + toHex(item.blue); }
-      function cycleTypes(item) { return [0,1,2,3].filter(type => (item.cycleMask & (1<<type)) !== 0); }
+      function cycleTypes(item) { return [0,1,2,3,4].filter(type => (item.cycleMask & (1<<type)) !== 0); }
+      function usesHumidity(item) { return item.kind===0 && (item.cycleEnabled ? (item.cycleMask&humidityMask)!==0 : item.type===4); }
       function activeType(item) {
         if (!item.cycleEnabled) return item.type;
         const types=cycleTypes(item); if (!types.length) return item.type;
@@ -356,31 +376,49 @@ R"HTML(</span></footer>
         const now = new Date(), two = value => String(value).padStart(2,'0');
         if (type === 1) return two(now.getHours()) + ':' + two(now.getMinutes());
         if (type === 2) return two(now.getDate()) + '/' + two(now.getMonth()+1) + '/' + two(now.getFullYear()%100);
+        // Mirrors PanelContentApplication::buildText on the device.
         if (type === 3) {
-          if (!Number.isFinite(state.temperatureValue)) return 'TMP?';
+          if (!Number.isFinite(state.temperatureValue)) return state.sensor.missingText;
           const value=Number(state.temperatureValue);
           const rounded=value<0?-Math.round(-value):Math.round(value);
           return (item.temperatureFormat===1?String(rounded):value.toFixed(1))+'°C';
         }
+        if (type === 4) {
+          if (!state.sensor.humidity) return '--%';
+          if (!Number.isFinite(state.humidityValue)) return state.sensor.missingText;
+          const value=Number(state.humidityValue);
+          return (item.temperatureFormat===1?String(Math.round(value)):value.toFixed(1))+'%';
+        }
         return item.text || 'YAZI';
       }
-      function formatInitialValue(item) {
-        const value=Number(item.initialValue);
-        if(!Number.isFinite(value)) return '0';
-        return item.valueSource===0&&item.valueType===1 ? value.toFixed(1) : String(Math.trunc(value));
+      function usesFloat(item) { return item.valueSource===0&&item.valueType===1; }
+      function formatNumber(item,value) {
+        // Mirrors ValueBoxApplication::formatValue on the device.
+        const decimals=Math.max(0,Math.min(3,Number(item.decimals)||0));
+        if(!Number.isFinite(value)) return 'nan';
+        if(usesFloat(item)) return value.toFixed(decimals);
+        const integer=Math.trunc(value);
+        if(!decimals) return String(integer);
+        const magnitude=Math.abs(integer), divisor=10**decimals;
+        return (integer<0?'-':'')+Math.floor(magnitude/divisor)+'.'+String(magnitude%divisor).padStart(decimals,'0');
       }
       function liveText(item) {
-        return item.kind===1 ? (item.currentValue||formatInitialValue(item)) : textForType(item,activeType(item));
+        if(item.kind!==1) return textForType(item,activeType(item));
+        const current=Number.isFinite(item.currentRaw)?item.currentRaw:Number(item.initialValue)||0;
+        return formatNumber(item,current)+(item.suffix||'');
       }
       function fontName(item) { return state.fonts[item.font] || state.fonts[state.defaultFont] || 'GohuFont6x11'; }
-      const turkishGlyphCodes = {'Ç':0x7F,'Ğ':0x80,'İ':0x81,'Ö':0x82,'Ş':0x83,'Ü':0x84,'ç':0x85,'ğ':0x86,'ı':0x87,'ö':0x88,'ş':0x89,'ü':0x8A,'°':0x8B};
+      // Private glyph codes shared with FontGfx_apple6x10.h on the device.
+      const extendedGlyphCodes = {'Ç':0x7F,'Ğ':0x80,'İ':0x81,'Ö':0x82,'Ş':0x83,'Ü':0x84,'ç':0x85,'ğ':0x86,'ı':0x87,'ö':0x88,'ş':0x89,'ü':0x8A,'°':0x8B,
+        'Ä':0x8C,'ä':0x8D,'Á':0x8E,'á':0x8F,'É':0x90,'é':0x91,'Í':0x92,'í':0x93,'Ó':0x94,'ó':0x95,'Ú':0x96,'ú':0x97,'Ñ':0x98,'ñ':0x99,'¡':0x9A,'¿':0x9B};
       function encodedFontCodes(item,text) {
         const codes=[];
         for(const character of text) {
           const code=character.codePointAt(0);
           if(code<0x80) codes.push(code);
           else if(character==='℃') codes.push(0x8B,0x43);
-          else if(turkishGlyphCodes[character]!==undefined) codes.push(turkishGlyphCodes[character]);
+          else if(character==='ß') codes.push(0x73,0x73);
+          else if(extendedGlyphCodes[character]!==undefined) codes.push(extendedGlyphCodes[character]);
           else codes.push('?'.charCodeAt(0));
         }
         return codes;
@@ -449,6 +487,21 @@ R"HTML(</span></footer>
         const origin=alignedOrigin(item);
         node.style.left=(origin.x*sx)+'px';
         node.style.top=(origin.y*sy)+'px';
+        applyPreviewClip(node,item,origin,sx,sy);
+      }
+      function applyPreviewClip(node,item,origin,sx,sy) {
+        // Same rule as the panel: a box set to its own panel is clipped there.
+        // Clipping the node also keeps its hidden part from catching clicks
+        // meant for boxes on the neighbouring panel; unclipped sides keep room
+        // for the outline and badges.
+        if(item.scrollArea!==0) { node.style.clipPath=''; return; }
+        const canvas=node.querySelector('canvas');
+        const left=(item.panel%state.columns)*PW, top=Math.floor(item.panel/state.columns)*PH;
+        const width=parseFloat(canvas.style.width)||0, height=parseFloat(canvas.style.height)||0;
+        const inset=value => value>0?value+'px':'-20px';
+        const insetTop=(top-origin.y)*sy, insetLeft=(left-origin.x)*sx;
+        const insetRight=width-(left+PW-origin.x)*sx, insetBottom=height-(top+PH-origin.y)*sy;
+        node.style.clipPath=`inset(${inset(insetTop)} ${inset(insetRight)} ${inset(insetBottom)} ${inset(insetLeft)})`;
       }
       function drawPreviewCanvas(canvas,item,sx,sy) {
         const type=activeType(item), layout=gfxLayout(item,type);
@@ -484,8 +537,8 @@ R"HTML(</span></footer>
         }
       }
       function renderPreviewNode(node,item,sx,sy) {
-        positionPreviewNode(node,item,sx,sy);
         drawPreviewCanvas(node.querySelector('canvas'),item,sx,sy);
+        positionPreviewNode(node,item,sx,sy);
       }
       function utf8Length(value) { return encodeURIComponent(value).replace(/%[0-9A-F]{2}|./gi,'x').length; }
 
@@ -620,7 +673,8 @@ R"HTML(</span></footer>
           scrolling:false, direction:0, speed:10, cycleEnabled:false, cycleMask:1,
           cycleInterval:5, _cycleStartedAt:Date.now(), text:'YAZI', initialValue:0,
           valueSource:0, registerAddress:nextRegisterAddress(), valueType:0,
-          counterDirection:0, temperatureFormat:0, font:state.defaultFont, currentValue:'0' };
+          counterDirection:0, temperatureFormat:0, font:state.defaultFont,
+          scrollArea:0, decimals:0, suffix:'', currentRaw:0 };
         state.items.push(item); state.selectedId=item.id;
         renderStage(); syncEditor(); setStatus('Yeni {box} eklendi.','',{box:boxNames[kind]});
       }
@@ -641,18 +695,24 @@ R"HTML(</span></footer>
         $('valueBoxOptions').hidden=!isValue;
         $('deleteItem').textContent=t('{box} Sil',{box:boxNames[item.kind]});
         document.querySelectorAll('[data-type]').forEach(button => {
-          const active=Number(button.dataset.type)===item.type;
+          const type=Number(button.dataset.type);
+          const active=type===item.type;
           button.classList.toggle('active',active); button.setAttribute('aria-pressed',String(active));
-          button.disabled=item.cycleEnabled;
+          button.disabled=item.cycleEnabled || (type===4 && !state.sensor.humidity && !active);
         });
+        $('humidityNote').hidden=state.sensor.humidity;
+        $('humidityNote').textContent=t('Seçili sensör ({sensor}) nem ölçmez. Sensör, Ayarlar → Sıcaklık Sensörü bölümünden değiştirilebilir.',{sensor:state.sensor.name});
         const cycleUsesText=item.cycleEnabled && (item.cycleMask&1)!==0;
         $('textValue').value=item.text; $('textValue').disabled=item.cycleEnabled?!cycleUsesText:item.type!==0;
         $('cycleEnabled').checked=item.cycleEnabled;
         $('cycleOptions').hidden=!item.cycleEnabled;
-        document.querySelectorAll('[data-cycle-type]').forEach(input => { input.checked=(item.cycleMask&(1<<Number(input.dataset.cycleType)))!==0; });
+        document.querySelectorAll('[data-cycle-type]').forEach(input => {
+          input.checked=(item.cycleMask&(1<<Number(input.dataset.cycleType)))!==0;
+          input.disabled=Number(input.dataset.cycleType)===4 && !state.sensor.humidity && !input.checked;
+        });
         $('cycleInterval').value=item.cycleInterval;
         const usesTemperature=item.cycleEnabled?(item.cycleMask&8)!==0:item.type===3;
-        $('temperatureFormatOptions').hidden=!usesTemperature;
+        $('temperatureFormatOptions').hidden=!usesTemperature && !usesHumidity(item);
         $('temperatureFormat').value=item.temperatureFormat;
         $('initialValue').value=item.initialValue;
         $('initialValue').step=item.valueSource===0&&item.valueType===1?'any':'1';
@@ -665,8 +725,11 @@ R"HTML(</span></footer>
         $('registerAddress').value=item.registerAddress;
         $('valueType').value=item.valueType;
         $('counterDirection').value=item.counterDirection;
+        $('valueDecimals').value=item.decimals;
+        $('valueSuffix').value=item.suffix;
         $('itemFont').value=item.font;
         $('itemRotation').value=item.rotation;
+        $('itemScrollArea').value=item.scrollArea;
         $('itemColor').value=itemColor(item); $('colorCode').textContent=itemColor(item).toUpperCase();
         $('scrollEnabled').checked=item.scrolling;
         $('scrollDirection').value=item.direction; $('scrollDirection').disabled=!item.scrolling;
@@ -703,17 +766,26 @@ R"HTML(</span></footer>
       });
       document.querySelectorAll('[data-value-source]').forEach(button => button.addEventListener('click',()=>{
         const item=selectedItem(); if(!item||item.kind!==1) return;
-        item.valueSource=Number(button.dataset.valueSource); item.currentValue=formatInitialValue(item);
+        item.valueSource=Number(button.dataset.valueSource); item.currentRaw=Number(item.initialValue)||0;
         syncEditor(); renderStage(); setStatus('ValueBox veri kaynağı değişti.');
       }));
       $('initialValue').addEventListener('input',event => {
         const item=selectedItem(); if(!item||item.kind!==1) return;
-        item.initialValue=event.target.value; item.currentValue=formatInitialValue(item); renderStage();
+        item.initialValue=event.target.value; item.currentRaw=Number(item.initialValue)||0; renderStage();
       });
       $('registerAddress').addEventListener('input',event => { const item=selectedItem(); if(item&&item.kind===1) item.registerAddress=Number(event.target.value); });
       $('valueType').addEventListener('change',event => {
         const item=selectedItem(); if(!item||item.kind!==1) return;
-        item.valueType=Number(event.target.value); item.currentValue=formatInitialValue(item); syncEditor(); renderStage();
+        item.valueType=Number(event.target.value); item.currentRaw=Number(item.initialValue)||0; syncEditor(); renderStage();
+      });
+      $('valueDecimals').addEventListener('change',event => {
+        const item=selectedItem(); if(!item||item.kind!==1) return;
+        item.decimals=Number(event.target.value); renderStage(); setStatus('Ondalık basamak sayısı değişti.');
+      });
+      $('valueSuffix').addEventListener('input',event => { const item=selectedItem(); if(item&&item.kind===1){ item.suffix=event.target.value; renderStage(); } });
+      $('itemScrollArea').addEventListener('change',event => {
+        const item=selectedItem(); if(!item) return;
+        item.scrollArea=Number(event.target.value)===1?1:0; renderStage(); setStatus('Gösterim alanı değişti.');
       });
       $('counterDirection').addEventListener('change',event => { const item=selectedItem(); if(item&&item.kind===1) item.counterDirection=Number(event.target.value); });
       $('itemFont').addEventListener('change',async event => {
@@ -747,25 +819,34 @@ R"HTML(</span></footer>
         try {
           const data=await request('/api/content');
           state.rows=data.panel.rows; state.columns=data.panel.columns; state.maxPerPanel=data.panel.maxPerPanel;
+          if(data.sensor) state.sensor={type:Number(data.sensor.type), name:String(data.sensor.name), humidity:Boolean(data.sensor.humidity), missingText:String(data.sensor.missingText)};
           state.fonts=Array.isArray(data.fonts)?data.fonts:[];
           state.defaultFont=Number.isInteger(Number(data.defaultFont))?Number(data.defaultFont):2;
           const fontSelect=$('itemFont'); fontSelect.replaceChildren();
           state.fonts.forEach((name,id)=>{
             const option=document.createElement('option'); option.value=String(id); option.textContent=name; fontSelect.appendChild(option);
           });
-          state.items=data.items.map(item=>({...item,kind:Number(item.kind)||0,rotation:item.rotation||0,
-            cycleEnabled:Boolean(item.cycleEnabled),cycleMask:Number(item.cycleMask)||(1<<item.type),
-            cycleInterval:Number(item.cycleInterval)||5,initialValue:Number(item.initialValue)||0,
-            valueSource:Number(item.valueSource)||0,registerAddress:Number(item.registerAddress)||0,
-            valueType:Number(item.valueType)||0,counterDirection:Number(item.counterDirection)||0,
-            temperatureFormat:Number(item.temperatureFormat)===1?1:0,
-            font:Number.isInteger(Number(item.font))?Number(item.font):state.defaultFont,
-            currentValue:String(item.currentValue||''),_cycleStartedAt:Date.now(),id:state.nextId++}));
+          state.items=data.items.map(item=>{
+            const kind=Number(item.kind)||0;
+            return {...item,kind,rotation:item.rotation||0,
+              cycleEnabled:Boolean(item.cycleEnabled),cycleMask:Number(item.cycleMask)||(1<<item.type),
+              cycleInterval:Number(item.cycleInterval)||5,initialValue:Number(item.initialValue)||0,
+              valueSource:Number(item.valueSource)||0,registerAddress:Number(item.registerAddress)||0,
+              valueType:Number(item.valueType)||0,counterDirection:Number(item.counterDirection)||0,
+              temperatureFormat:Number(item.temperatureFormat)===1?1:0,
+              font:Number.isInteger(Number(item.font))?Number(item.font):state.defaultFont,
+              scrollArea:Number(item.scrollArea)===1?1:0,decimals:Number(item.decimals)||0,
+              // ValueBoxes store their unit suffix in the text field.
+              text:kind===1?'YAZI':String(item.text||''),suffix:kind===1?String(item.text||''):'',
+              currentRaw:item.currentRaw===null||item.currentRaw===undefined?null:Number(item.currentRaw),
+              _cycleStartedAt:Date.now(),id:state.nextId++};
+          });
           const requiredFonts=new Set([state.defaultFont,...state.items.map(item=>item.font)]);
           for(const fontId of requiredFonts) await loadFontData(fontId);
           state.selectedPanel=0; state.selectedId=state.items.length?state.items[0].id:null;
           renderStage(); syncEditor(); saveButton.disabled=false;
-          setStatus('Panel içeriği hazır.','ok');
+          if(!state.sensor.humidity && state.items.some(usesHumidity)) setStatus('Seçili sensör ({sensor}) nem ölçmez; nem gösteren kutuları değiştirin.','error',{sensor:state.sensor.name});
+          else setStatus('Panel içeriği hazır.','ok');
         } catch(error) { setStatus(error.message,'error'); }
       }
       async function loadTemperature() {
@@ -774,12 +855,16 @@ R"HTML(</span></footer>
           state.temperatureValue=data.ready && Number.isFinite(data.temperature)
             ? Number(data.temperature)
             : null;
-        } catch(error) { state.temperatureValue=null; }
+          state.humidityValue=data.ready && Number.isFinite(data.humidity)
+            ? Number(data.humidity)
+            : null;
+        } catch(error) { state.temperatureValue=null; state.humidityValue=null; }
       }
       async function saveContent() {
         const registerRanges=[];
         for (const item of state.items) {
           if(!Number.isInteger(item.font)||item.font<0||item.font>=state.fonts.length){ selectItem(item.id); setStatus('Yazı tipi seçimi geçersiz.','error'); return; }
+          if(usesHumidity(item) && !state.sensor.humidity){ selectItem(item.id); setStatus('Seçili sensör ({sensor}) nem ölçmez; nem gösteren kutuları değiştirin.','error',{sensor:state.sensor.name}); return; }
           if(item.kind===0){
             const textRequired=(!item.cycleEnabled&&item.type===0)||(item.cycleEnabled&&(item.cycleMask&1)!==0);
             if (textRequired && !item.text.trim()) { selectItem(item.id); setStatus('Yazı içeriği boş bırakılamaz.','error'); return; }
@@ -791,6 +876,7 @@ R"HTML(</span></footer>
 
           const initial=Number(item.initialValue);
           if(!Number.isFinite(initial)){ selectItem(item.id); setStatus('ValueBox başlangıç değeri geçersiz.','error'); return; }
+          if(utf8Length(item.suffix)>15){ selectItem(item.id); setStatus('ValueBox birimi en fazla 15 bayt olabilir.','error'); return; }
           if(item.valueSource===1){
             if(!Number.isInteger(initial)||initial<-2147483648||initial>2147483647){ selectItem(item.id); setStatus('Dijital sayaç başlangıç değeri 32-bit bir integer olmalıdır.','error'); return; }
             continue;
@@ -801,11 +887,12 @@ R"HTML(</span></footer>
           if(registerRanges.some(other=>range.start<=other.end&&other.start<=range.end)){ selectItem(item.id); setStatus('Modbus ValueBox register adresleri çakışamaz.','error'); return; }
           registerRanges.push(range);
         }
+        // Field order is documented at parseContentPayload() in PortalApplication.cpp.
         const records=state.items.map(item => [item.panel,item.type,item.rotation,item.x,item.y,
           itemColor(item).slice(1).toUpperCase(),item.scrolling?1:0,item.direction,item.speed,
-          encodeURIComponent(item.text||''),item.cycleEnabled?1:0,item.cycleMask,item.cycleInterval,
+          encodeURIComponent((item.kind===1?item.suffix:item.text)||''),item.cycleEnabled?1:0,item.cycleMask,item.cycleInterval,
           item.kind,Number(item.initialValue)||0,item.valueSource,item.registerAddress,item.valueType,
-          item.counterDirection,item.temperatureFormat,item.font].join('|')).join('\n');
+          item.counterDirection,item.temperatureFormat,item.font,item.scrollArea,item.kind===1?item.decimals:0].join('|')).join('\n');
         saveButton.disabled=true; setStatus('Panele uygulanıyor…');
         try { await request('/api/content',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:records}); setStatus('İçerik panele uygulandı ve flash belleğe kaydedildi.','ok'); }
         catch(error) { setStatus(error.message,'error'); }
@@ -967,6 +1054,8 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
     .wifi-connection[data-state="failed"] { border-color: rgba(239,76,91,.34); }
     .wifi-connection[data-state="failed"] .wifi-dot { background: #ef4c5b; box-shadow: 0 0 0 5px rgba(239,76,91,.15); }
     .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+    .section-form { margin-top: 26px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.08); }
+    [hidden] { display: none !important; }
     .button {
       min-height: 44px; padding: 10px 18px; color: white; cursor: pointer;
       border: 0; border-radius: 12px; background: #247cf0; font-weight: 800;
@@ -1107,6 +1196,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
     <nav class="tabs" aria-label="Ayar grupları">
       <button class="tab active" data-target="panel">Panel Ayarları</button>
       <button class="tab" data-target="clock">Saat ve Tarih Ayarları</button>
+      <button class="tab" data-target="sensor">Sıcaklık Sensörü</button>
       <button class="tab" data-target="alarm">Alarm Ayarları</button>
       <button class="tab" data-target="communication">Haberleşme Ayarları</button>
       <button class="tab" data-target="wifi">Wi-Fi Ayarları</button>
@@ -1137,6 +1227,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
           <div class="field full">
             <label for="brightness">Parlaklık</label>
             <div class="range-row"><input id="brightness" name="brightness" type="range" min="0" max="255"><output id="brightness-value">64</output></div>
+            <p class="sleep-hint">Yalnızca parlaklık değiştiyse ayar yeniden başlatmadan hemen uygulanır.</p>
           </div>
           <div class="field full">
             <label>Panel bağlantı şekli</label>
@@ -1194,8 +1285,50 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
       <p class="note">Bilgiler DS3231 gerçek zaman saatine yazılır; elektrik kesildiğinde RTC piliyle korunur.</p>
       <form id="clock-form">
         <div class="grid">
+          <p class="sta-warning" id="rtc-missing" role="note" hidden><span aria-hidden="true">&#9888;</span><span>RTC bulunamadı. DS3231 bağlantısını kontrol edin; saat ve tarih ayarlanamaz.</span></p>
           <div class="field"><label for="date">Tarih</label><input id="date" name="date" type="date" required></div>
           <div class="field"><label for="time">Saat</label><input id="time" name="time" type="time" step="1" required></div>
+          <p class="sleep-hint">Alanlar cihaz saatiyle birlikte ilerler. Elle girdiğiniz değer de kaydedene kadar saymaya devam eder.</p>
+        </div>
+        <div class="actions">
+          <button class="button secondary" id="browser-time" type="button">Telefon/Bilgisayar Saatini Kullan</button>
+          <button class="button" id="clock-submit" type="submit">Saat ve Tarihi Kaydet</button>
+        </div>
+      </form>
+
+      <form id="time-sync-form" class="section-form">
+        <div class="grid">
+          <fieldset>
+            <legend>İnternet saati (NTP)</legend>
+            <label class="sleep-toggle" for="ntpEnabled">
+              <input id="ntpEnabled" type="checkbox" value="1">
+              STA ağına bağlıyken saati otomatik eşitle
+            </label>
+            <div class="field"><label for="ntpServer">NTP sunucusu</label><input id="ntpServer" name="ntpServer" maxlength="63" required></div>
+            <div class="field">
+              <label for="timeZonePreset">Saat dilimi</label>
+              <select id="timeZonePreset">
+                <option value="&lt;+03&gt;-3">UTC+3 — Türkiye, Suudi Arabistan</option>
+                <option value="UTC0">UTC</option>
+                <option value="GMT0BST,M3.5.0/1,M10.5.0">Birleşik Krallık (UTC+0, yaz saati)</option>
+                <option value="CET-1CEST,M3.5.0,M10.5.0/3">Orta Avrupa — Almanya, İspanya (UTC+1, yaz saati)</option>
+                <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Doğu Avrupa — Yunanistan (UTC+2, yaz saati)</option>
+                <option value="MSK-3">Moskova (UTC+3)</option>
+                <option value="&lt;+04&gt;-4">Körfez — BAE (UTC+4)</option>
+                <option value="EST5EDT,M3.2.0,M11.1.0">ABD Doğu (UTC−5, yaz saati)</option>
+                <option value="custom">Özel POSIX TZ değeri</option>
+              </select>
+            </div>
+            <div class="field full" id="custom-time-zone" hidden><label for="timeZone">POSIX TZ değeri</label><input id="timeZone" maxlength="63" placeholder="CET-1CEST,M3.5.0,M10.5.0/3"></div>
+            <p class="sleep-hint" id="ntp-status">—</p>
+            <p class="sleep-hint">Eşitlenen yerel saat RTC'ye yazılır; yaz saati geçişleri seçilen saat dilimine göre uygulanır. NTP açıkken elle girilen saat bir sonraki eşitlemede düzeltilir.</p>
+          </fieldset>
+        </div>
+        <div class="actions"><button class="button" type="submit">NTP Ayarlarını Kaydet</button></div>
+      </form>
+
+      <form id="sleep-form" class="section-form">
+        <div class="grid">
           <fieldset>
             <legend>Panel uyku ayarı</legend>
             <label class="sleep-toggle" for="sleepEnabled">
@@ -1208,10 +1341,80 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
             <p class="sleep-hint">Panel her gün başlangıç saatinde karartılır. Bitiş saati seçili açılış günlerinin dışında kalırsa panel kapalı kalır ve ilk uygun günün bitiş saatinde açılır. Örneğin cuma 23:00’te kapanan panel, hafta içi seçiminde pazartesi 07:00’de açılır. Cihaz, Wi-Fi ve web arayüzü çalışmaya devam eder.</p>
           </fieldset>
         </div>
-        <div class="actions">
-          <button class="button secondary" id="browser-time" type="button">Telefon/Bilgisayar Saatini Kullan</button>
-          <button class="button" type="submit">Saat ve Tarihi Kaydet</button>
+        <div class="actions"><button class="button" type="submit">Uyku Ayarlarını Kaydet</button></div>
+      </form>
+    </section>
+
+    <section class="panel" id="sensor-section">
+      <h2>Sıcaklık Sensörü</h2>
+      <p class="note">Karta takılı sensör modelini seçin. Ayarlar kaydedildiğinde cihaz yeniden başlatılmadan uygulanır. Seçili sensör bulunamazsa panelde TMP?, SHT? veya HDC? gösterilir.</p>
+      <div class="wifi-connection" id="sensor-status" data-state="waiting" role="status" aria-live="polite">
+        <span class="wifi-dot" aria-hidden="true"></span>
+        <span class="wifi-copy">
+          <strong id="sensor-status-label">Sensör durumu alınıyor</strong>
+          <span id="sensor-status-detail">Lütfen bekleyin…</span>
+        </span>
+        <code class="wifi-ip" id="sensor-reading" hidden></code>
+      </div>
+      <form id="sensor-form">
+        <div class="grid">
+          <div class="field full">
+            <label for="sensorType">Sensör modeli</label>
+            <select id="sensorType" name="type">
+              <option value="1">TMP112 — yalnızca sıcaklık</option>
+              <option value="0">SHT40 — sıcaklık ve nem</option>
+              <option value="2">HDC2022 — sıcaklık ve nem</option>
+            </select>
+          </div>
+          <div class="field"><label for="sensorInterval">Ölçüm aralığı (saniye)</label><input id="sensorInterval" name="interval" type="number" min="1" max="60" step="1" inputmode="numeric" required></div>
+          <div class="field"><label for="temperatureOffset">Sıcaklık düzeltmesi (°C)</label><input id="temperatureOffset" type="number" min="-10" max="10" step="0.1" inputmode="decimal" required></div>
+          <div class="field" id="humidity-offset-field"><label for="humidityOffset">Nem düzeltmesi (%RH)</label><input id="humidityOffset" type="number" min="-20" max="20" step="0.1" inputmode="decimal" required></div>
+          <p class="sleep-hint">Düzeltme değerleri ölçülen değere eklenir. Sensörü güvenilir bir referans ölçerle karşılaştırarak ayarlayın; sensör modeli değiştiğinde düzeltmeyi yeniden kontrol edin.</p>
+          <fieldset data-sensor-options="0">
+            <legend>SHT40 ayarları</legend>
+            <div class="field"><label for="sht40Address">I2C adresi</label><select id="sht40Address" name="sht40Address"><option value="68">0x44 — SHT40-AD1B</option><option value="69">0x45 — SHT40-BD1B</option></select></div>
+            <div class="field"><label for="sht40Precision">Ölçüm hassasiyeti</label><select id="sht40Precision" name="sht40Precision"><option value="0">Yüksek — en fazla 8.2 ms</option><option value="1">Orta — en fazla 4.5 ms</option><option value="2">Düşük — en fazla 1.7 ms</option></select></div>
+            <p class="sleep-hint">Yüksek hassasiyet en düşük ölçüm gürültüsünü verir; düşük hassasiyet ölçümü kısaltır ve daha az enerji harcar. Adres, ürün kodundaki AD1B/BD1B sürümüne göre sabittir.</p>
+          </fieldset>
+          <fieldset data-sensor-options="1">
+            <legend>TMP112 ayarları</legend>
+            <div class="field">
+              <label for="tmp112Address">I2C adresi</label>
+              <select id="tmp112Address" name="tmp112Address">
+                <option value="72">0x48 — ADD0 → GND</option>
+                <option value="73">0x49 — ADD0 → V+</option>
+                <option value="74">0x4A — ADD0 → SDA</option>
+                <option value="75">0x4B — ADD0 → SCL</option>
+                <option value="64">0x40 — TMP112D X2SON, ADD0 → GND</option>
+                <option value="65">0x41 — TMP112D X2SON, ADD0 → V+</option>
+                <option value="66">0x42 — TMP112D X2SON, ADD0 → SDA</option>
+                <option value="67">0x43 — TMP112D X2SON, ADD0 → SCL</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="tmp112ConversionRate">Dönüşüm hızı</label>
+              <select id="tmp112ConversionRate" name="tmp112ConversionRate">
+                <option value="0">0.25 Hz</option>
+                <option value="1">1 Hz</option>
+                <option value="2">4 Hz (varsayılan)</option>
+                <option value="3">8 Hz</option>
+              </select>
+            </div>
+            <label class="sleep-toggle" for="tmp112ExtendedMode">
+              <input id="tmp112ExtendedMode" type="checkbox" value="1">
+              Genişletilmiş ölçüm aralığı (13 bit, 150 °C'ye kadar)
+            </label>
+            <p class="sleep-hint">TMP112 yalnızca sıcaklık ölçer; nem gösteren kutular bu sensörle kullanılamaz. Sensör sürekli ölçüm yapar; düşük dönüşüm hızı akım tüketimini azaltır.</p>
+          </fieldset>
+          <fieldset data-sensor-options="2">
+            <legend>HDC2022 ayarları</legend>
+            <div class="field full"><label for="hdc2022Address">I2C adresi</label><select id="hdc2022Address" name="hdc2022Address"><option value="64">0x40 — ADDR → GND</option><option value="65">0x41 — ADDR → VDD</option></select></div>
+            <div class="field"><label for="hdc2022TemperatureResolution">Sıcaklık çözünürlüğü</label><select id="hdc2022TemperatureResolution" name="hdc2022TemperatureResolution"><option value="0">14 bit — 594 µs</option><option value="1">11 bit — 336 µs</option><option value="2">9 bit — 208 µs</option></select></div>
+            <div class="field"><label for="hdc2022HumidityResolution">Nem çözünürlüğü</label><select id="hdc2022HumidityResolution" name="hdc2022HumidityResolution"><option value="0">14 bit — 640 µs</option><option value="1">11 bit — 383 µs</option><option value="2">9 bit — 254 µs</option></select></div>
+            <p class="sleep-hint">ADDR pini boşta bırakılırsa adres 0x40 olur; gürültülü ortamlarda pini GND veya VDD'ye bağlayın. Ölçüm her aralıkta tek seferlik tetiklenir.</p>
+          </fieldset>
         </div>
+        <div class="actions"><button class="button" type="submit">Sensör Ayarlarını Kaydet</button></div>
       </form>
     </section>
 
@@ -1277,16 +1480,23 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
       </div>
       <form id="wifi-form">
         <div class="grid">
+          <p class="sta-warning" id="default-password-warning" role="note" hidden><span aria-hidden="true">&#9888;</span><span>Varsayılan AP parolası kullanılıyor. Cihazı devreye almadan önce parolayı değiştirin.</span></p>
           <fieldset>
             <legend>Mevcut cihaz ağı (AP)</legend>
             <div class="field"><label for="apSsid">SSID</label><input id="apSsid" name="apSsid" maxlength="32" required></div>
-            <div class="field"><label for="apPassword">Parola</label><input id="apPassword" name="apPassword" type="password" minlength="8" maxlength="63" required></div>
+            <div class="field"><label for="apPassword">Parola</label><input id="apPassword" name="apPassword" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="Kayıtlı parola korunur; değiştirmek için yazın"></div>
+            <p class="sleep-hint">Kayıtlı parolalar güvenlik nedeniyle bu sayfada gösterilmez; alan boş bırakılırsa mevcut parola korunur.</p>
           </fieldset>
           <fieldset>
             <legend>Bağlanılacak ağ (STA)</legend>
             <p class="sta-warning" role="note"><span aria-hidden="true">&#9888;</span><span><strong>Yalnızca 2.4 GHz:</strong> ESP32-S3, 5 GHz Wi-Fi ağlarına bağlanamaz. STA için 2.4 GHz yayın yapan bir SSID seçin.</span></p>
             <div class="field"><label for="staSsid">SSID</label><input id="staSsid" name="staSsid" maxlength="32" placeholder="Boş bırakılırsa devre dışı"></div>
-            <div class="field"><label for="staPassword">Parola</label><input id="staPassword" name="staPassword" type="password" maxlength="63" placeholder="Açık ağ için boş bırakılabilir"></div>
+            <div class="field"><label for="staPassword">Parola</label><input id="staPassword" name="staPassword" type="password" maxlength="63" autocomplete="new-password" placeholder="Açık ağ için boş bırakılabilir"></div>
+            <label class="sleep-toggle" for="staAuthentication">
+              <input id="staAuthentication" type="checkbox" value="1">
+              Bu ağdan erişimde kullanıcı adı ve parola iste
+            </label>
+            <p class="sleep-hint">Açıkken bu ağdan bağlanan tarayıcı giriş ister: kullanıcı adı admin, parola cihazın AP parolasıdır. Portal HTTPS kullanmadığı için Chrome bu girişte bağlantının gizli olmadığı uyarısını gösterir. Kapalıyken aynı ağdaki herkes ayarları değiştirebilir ve firmware yükleyebilir.</p>
           </fieldset>
         </div>
         <div class="actions"><button class="button" type="submit">Wi-Fi Ayarlarını Kaydet</button></div>
@@ -1570,9 +1780,121 @@ R"HTML(</footer>
       }
     }
 
-    async function loadSettings() {
-      try {
-        const data = await request('/api/settings');
+    // The date/time fields show a running clock: device time plus the time
+    // elapsed since it was read. A manually entered value keeps running from
+    // the moment it was entered, so saving later never writes a stale time.
+    const clockState = {offsetMs: null, fromDevice: true, editing: false};
+
+    function localTimestamp(date, time) {
+      const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || '');
+      const timeMatch = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(time || '');
+      if (!dateMatch || !timeMatch) return null;
+      return new Date(Number(dateMatch[1]), Number(dateMatch[2]) - 1, Number(dateMatch[3]),
+        Number(timeMatch[1]), Number(timeMatch[2]), Number(timeMatch[3] || 0)).getTime();
+    }
+
+    function renderClock() {
+      if (clockState.offsetMs === null || clockState.editing) return;
+      const now = new Date(Date.now() + clockState.offsetMs);
+      const pad = value => String(value).padStart(2, '0');
+      byId('date').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      byId('time').value = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    }
+
+    function captureManualClock() {
+      const timestamp = localTimestamp(byId('date').value, byId('time').value);
+      if (timestamp === null) return;
+      clockState.offsetMs = timestamp - Date.now();
+      clockState.fromDevice = false;
+    }
+
+    ['date', 'time'].forEach(id => {
+      const input = byId(id);
+      input.addEventListener('focus', () => { clockState.editing = true; });
+      input.addEventListener('change', captureManualClock);
+      input.addEventListener('blur', () => { captureManualClock(); clockState.editing = false; renderClock(); });
+    });
+
+    const timeZonePresets = [...byId('timeZonePreset').options].map(option => option.value).filter(value => value !== 'custom');
+
+    function selectedTimeZone() {
+      const preset = byId('timeZonePreset').value;
+      return preset === 'custom' ? byId('timeZone').value.trim() : preset;
+    }
+
+    function updateTimeZoneControls() {
+      byId('custom-time-zone').hidden = byId('timeZonePreset').value !== 'custom';
+    }
+    byId('timeZonePreset').addEventListener('change', updateTimeZoneControls);
+
+    let timeSyncData = null;
+    function renderTimeSyncStatus() {
+      const data = timeSyncData;
+      if (!data) return;
+      let text = t('NTP eşitlemesi kapalı.');
+      if (data.enabled && data.synchronized) {
+        const minutes = Math.floor((Number(data.secondsSinceSync) || 0) / 60);
+        text = minutes < 1
+          ? t('Saat az önce NTP ile eşitlendi.')
+          : t('Son NTP eşitlemesi {minutes} dakika önce yapıldı.', {minutes});
+      } else if (data.enabled && data.stationConnected) {
+        text = t('NTP sunucusundan yanıt bekleniyor…');
+      } else if (data.enabled) {
+        text = t('NTP için cihazın STA ağına bağlı olması gerekir.');
+      }
+      byId('ntp-status').textContent = text;
+    }
+
+    function updateSensorOptions() {
+      const type = byId('sensorType').value;
+      document.querySelectorAll('[data-sensor-options]').forEach(fieldset => {
+        fieldset.hidden = fieldset.dataset.sensorOptions !== type;
+      });
+      byId('humidity-offset-field').hidden = type === '1';
+    }
+    byId('sensorType').addEventListener('change', updateSensorOptions);
+
+    function renderSensorStatus(data) {
+      const box = byId('sensor-status');
+      const sensor = data && data.sensor ? data.sensor : {name: '—', address: 0, humidity: false, missingText: '?'};
+      const address = '0x' + Number(sensor.address).toString(16).toUpperCase().padStart(2, '0');
+      const reading = byId('sensor-reading');
+      if (!data || !data.found) {
+        box.dataset.state = 'failed';
+        byId('sensor-status-label').textContent = t('{sensor} bulunamadı', {sensor: sensor.name});
+        byId('sensor-status-detail').textContent = t('{address} adresinde cevap yok; panelde {text} gösteriliyor. Bağlantıyı ve adres seçimini kontrol edin.', {address, text: sensor.missingText});
+        reading.hidden = true;
+        return;
+      }
+      box.dataset.state = data.ready ? 'connected' : 'connecting';
+      byId('sensor-status-label').textContent = t('{sensor} bulundu', {sensor: sensor.name});
+      byId('sensor-status-detail').textContent = data.ready
+        ? t('{address} adresinden ölçüm alınıyor.', {address})
+        : t('İlk ölçüm bekleniyor…');
+      const parts = [];
+      if (Number.isFinite(data.temperature)) parts.push(Number(data.temperature).toFixed(1) + ' °C');
+      if (sensor.humidity && Number.isFinite(data.humidity)) parts.push(Number(data.humidity).toFixed(1) + ' %RH');
+      reading.textContent = parts.join(' • ');
+      reading.hidden = parts.length === 0;
+    }
+
+    let sensorStatusData = null;
+    async function loadSensorStatus() {
+      if (firmwareUploadActive) return;
+      try { sensorStatusData = await request('/api/temperature'); }
+      catch (error) { sensorStatusData = null; }
+      renderSensorStatus(sensorStatusData);
+    }
+
+    let wifiSettings = {staSsid: '', staPasswordSet: false};
+    function renderStaPasswordPlaceholder() {
+      byId('staPassword').placeholder = t(wifiSettings.staPasswordSet
+        ? 'Kayıtlı parola korunur; değiştirmek için yazın'
+        : 'Açık ağ için boş bırakılabilir');
+    }
+
+    function applySettings(data, initial) {
+      if (initial) {
         byId('scan').value = data.panel.scan;
         byId('rows').value = data.panel.rows;
         byId('columns').value = data.panel.columns;
@@ -1580,14 +1902,30 @@ R"HTML(</footer>
         byId('brightness-value').value = data.panel.brightness;
         selectConnection(data.panel.connectionStyle);
         updatePanelCount();
-        if (data.clock.available) {
-          byId('date').value = data.clock.date;
-          byId('time').value = data.clock.time;
-        }
-        byId('sleepEnabled').checked = Boolean(data.clock.sleepEnabled);
-        byId('sleepStart').value = data.clock.sleepStart;
-        byId('sleepEnd').value = data.clock.sleepEnd;
-        byId('sleepDayMode').value = data.clock.sleepDayMode;
+        byId('sleepEnabled').checked = Boolean(data.sleep.enabled);
+        byId('sleepStart').value = data.sleep.start;
+        byId('sleepEnd').value = data.sleep.end;
+        byId('sleepDayMode').value = data.sleep.dayMode;
+        byId('ntpEnabled').checked = Boolean(data.timeSync.enabled);
+        byId('ntpServer').value = data.timeSync.server;
+        const knownZone = timeZonePresets.includes(data.timeSync.timeZone);
+        byId('timeZonePreset').value = knownZone ? data.timeSync.timeZone : 'custom';
+        byId('timeZone').value = knownZone ? '' : data.timeSync.timeZone;
+        updateTimeZoneControls();
+        const sensor = data.temperatureSensor;
+        byId('sensorType').value = sensor.type;
+        byId('sensorInterval').value = sensor.interval;
+        byId('temperatureOffset').value = (Number(sensor.temperatureOffset) / 10).toFixed(1);
+        byId('humidityOffset').value = (Number(sensor.humidityOffset) / 10).toFixed(1);
+        byId('sht40Address').value = sensor.sht40Address;
+        byId('sht40Precision').value = sensor.sht40Precision;
+        byId('tmp112Address').value = sensor.tmp112Address;
+        byId('tmp112ConversionRate').value = sensor.tmp112ConversionRate;
+        byId('tmp112ExtendedMode').checked = Boolean(sensor.tmp112ExtendedMode);
+        byId('hdc2022Address').value = sensor.hdc2022Address;
+        byId('hdc2022TemperatureResolution').value = sensor.hdc2022TemperatureResolution;
+        byId('hdc2022HumidityResolution').value = sensor.hdc2022HumidityResolution;
+        updateSensorOptions();
         renderAlarms(data.alarms);
         byId('slaveAddress').value = data.communication.slaveAddress;
         byId('baudRate').value = data.communication.baudRate;
@@ -1595,10 +1933,34 @@ R"HTML(</footer>
         byId('parity').value = data.communication.parity;
         byId('handshake').value = data.communication.handshake;
         byId('apSsid').value = data.wifi.apSsid;
-        byId('apPassword').value = data.wifi.apPassword;
+        byId('apPassword').value = '';
         byId('staSsid').value = data.wifi.staSsid;
-        byId('staPassword').value = data.wifi.staPassword;
-      } catch (error) { showStatus(error.message, true); }
+        byId('staPassword').value = '';
+        byId('staAuthentication').checked = Boolean(data.wifi.staAuthentication);
+        wifiSettings = {staSsid: data.wifi.staSsid, staPasswordSet: Boolean(data.wifi.staPasswordSet)};
+        renderStaPasswordPlaceholder();
+      }
+      byId('default-password-warning').hidden = !data.wifi.apPasswordDefault;
+
+      const rtcAvailable = Boolean(data.clock.available);
+      byId('rtc-missing').hidden = rtcAvailable;
+      ['date', 'time', 'browser-time', 'clock-submit'].forEach(id => { byId(id).disabled = !rtcAvailable; });
+      const deviceTimestamp = rtcAvailable ? localTimestamp(data.clock.date, data.clock.time) : null;
+      if (deviceTimestamp !== null && clockState.fromDevice && !clockState.editing) {
+        clockState.offsetMs = deviceTimestamp - Date.now();
+        renderClock();
+      }
+
+      timeSyncData = data.timeSync;
+      renderTimeSyncStatus();
+    }
+
+    async function loadSettings(initial = true) {
+      try {
+        applySettings(await request('/api/settings'), initial);
+      } catch (error) {
+        if (initial) showStatus(error.message, true);
+      }
     }
 
     async function submitForm(event, endpoint) {
@@ -1613,9 +1975,40 @@ R"HTML(</footer>
             throw new Error(t('Özel alarm için en az bir gün seçilmelidir.'));
           }
         }
-        const body = new URLSearchParams(new FormData(event.currentTarget));
         if (endpoint === '/api/settings/clock') {
+          if (clockState.editing) captureManualClock();
+          clockState.editing = false;
+          renderClock();
+        }
+        const body = new URLSearchParams(new FormData(event.currentTarget));
+        if (endpoint === '/api/settings/temperature-sensor') {
+          body.set('temperatureOffset', String(Math.round(Number(byId('temperatureOffset').value) * 10)));
+          body.set('humidityOffset', String(Math.round(Number(byId('humidityOffset').value || 0) * 10)));
+          body.set('tmp112ExtendedMode', byId('tmp112ExtendedMode').checked ? '1' : '0');
+        }
+        if (endpoint === '/api/settings/temperature-sensor') {
+          const temperatureOffset = Math.round(Number(byId('temperatureOffset').value) * 10);
+          const humidityOffset = Math.round(Number(byId('humidityOffset').value || 0) * 10);
+          if (!Number.isFinite(temperatureOffset) || Math.abs(temperatureOffset) > 100) throw new Error(t('Sıcaklık düzeltmesi -10.0 ile 10.0 °C arasında olmalıdır.'));
+          if (!Number.isFinite(humidityOffset) || Math.abs(humidityOffset) > 200) throw new Error(t('Nem düzeltmesi -20.0 ile 20.0 %RH arasında olmalıdır.'));
+        }
+        if (endpoint === '/api/settings/sleep') {
           body.set('sleepEnabled', byId('sleepEnabled').checked ? '1' : '0');
+        }
+        if (endpoint === '/api/settings/time-sync') {
+          body.set('ntpEnabled', byId('ntpEnabled').checked ? '1' : '0');
+          body.set('timeZone', selectedTimeZone());
+        }
+        if (endpoint === '/api/settings/wifi') {
+          // Stored passwords are never sent to the browser; an empty field
+          // keeps the stored one. An empty STA password for a new SSID means
+          // an open network.
+          body.set('apPasswordKeep', byId('apPassword').value === '' ? '1' : '0');
+          const keepStaPassword = byId('staPassword').value === ''
+            && byId('staSsid').value === wifiSettings.staSsid
+            && wifiSettings.staPasswordSet;
+          body.set('staPasswordKeep', keepStaPassword ? '1' : '0');
+          body.set('staAuthentication', byId('staAuthentication').checked ? '1' : '0');
         }
         if (endpoint === '/api/settings/alarms') {
           const alarmCards = [...document.querySelectorAll('.alarm-card')];
@@ -1626,11 +2019,17 @@ R"HTML(</footer>
         }
         const result = await request(endpoint, {method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body});
         showStatus(I18n.server(result.message, 'İşlem tamamlandı.'));
+        if (endpoint === '/api/settings/clock') clockState.fromDevice = true;
+        if (endpoint === '/api/settings/time-sync') setTimeout(() => loadSettings(false), 3000);
+        if (endpoint === '/api/settings/temperature-sensor') setTimeout(loadSensorStatus, 300);
       } catch (error) { showStatus(error.message, true); }
     }
 
     byId('panel-form').addEventListener('submit', event => submitForm(event, '/api/settings/panel'));
     byId('clock-form').addEventListener('submit', event => submitForm(event, '/api/settings/clock'));
+    byId('time-sync-form').addEventListener('submit', event => submitForm(event, '/api/settings/time-sync'));
+    byId('sleep-form').addEventListener('submit', event => submitForm(event, '/api/settings/sleep'));
+    byId('sensor-form').addEventListener('submit', event => submitForm(event, '/api/settings/temperature-sensor'));
     byId('alarm-form').addEventListener('submit', event => submitForm(event, '/api/settings/alarms'));
     byId('communication-form').addEventListener('submit', event => submitForm(event, '/api/settings/communication'));
     byId('wifi-form').addEventListener('submit', event => submitForm(event, '/api/settings/wifi'));
@@ -1732,10 +2131,10 @@ R"HTML(</footer>
     }));
 
     byId('browser-time').addEventListener('click', () => {
-      const now = new Date();
-      const pad = value => String(value).padStart(2, '0');
-      byId('date').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-      byId('time').value = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+      clockState.offsetMs = 0;
+      clockState.fromDevice = false;
+      clockState.editing = false;
+      renderClock();
     });
 
     refreshAlarmList();
@@ -1744,10 +2143,19 @@ R"HTML(</footer>
     I18n.onChange(() => {
       refreshAlarmList();
       if (wifiStatusData) renderWifiStatus(wifiStatusData);
+      renderTimeSyncStatus();
+      renderStaPasswordPlaceholder();
+      renderSensorStatus(sensorStatusData);
       validateFirmwareFile();
     });
     setInterval(loadWifiStatus, 2000);
+    loadSensorStatus();
+    setInterval(loadSensorStatus, 2000);
     setInterval(updateWifiCountdown, 1000);
+    setInterval(renderClock, 1000);
+    // Keeps the device clock and NTP status current without touching fields
+    // the user may be editing.
+    setInterval(() => { if (!firmwareUploadActive) loadSettings(false); }, 30000);
   </script>
 </body>
 </html>)HTML";

@@ -1,8 +1,8 @@
 #include "ModbusRtuSlaveService.h"
 
 #include <cstring>
+#include <hal/uart_types.h>
 
-#include "AppConfig.h"
 #include "SettingsService.h"
 #include "ValueBoxApplication.h"
 
@@ -43,16 +43,23 @@ uint32_t serialConfiguration(const CommunicationSettings &settings)
   }
 }
 
-uint32_t calculateFrameGapMs(const CommunicationSettings &settings)
+// Silent interval that ends a frame, in character times. Modbus requires
+// 3.5 characters, and at least 1.75 ms above 19200 baud; 2 ms is used as the
+// lower bound to tolerate USB-RS485 adapters that pause inside a frame.
+uint8_t frameGapSymbols(const CommunicationSettings &settings)
 {
   const uint32_t bitsPerCharacter = 1U
     + settings.dataBits
     + (settings.parity == UartParity::none ? 0U : 1U)
     + 1U;
-  const uint32_t calculated =
-    (bitsPerCharacter * 3500U + settings.baudRate - 1U)
-    / settings.baudRate;
-  return calculated < 2U ? 2U : calculated;
+  const uint32_t characterTimeUs =
+    (bitsPerCharacter * 1000000UL + settings.baudRate - 1U) / settings.baudRate;
+  const uint32_t minimumGapUs = 2000;
+  uint32_t symbols = (minimumGapUs + characterTimeUs - 1U) / characterTimeUs;
+  if (symbols < 4) {
+    symbols = 4;
+  }
+  return static_cast<uint8_t>(symbols > 100 ? 100 : symbols);
 }
 
 const char *parityName(UartParity parity)
@@ -81,26 +88,60 @@ void ModbusRtuSlaveService::begin()
   const CommunicationSettings &communication = settings_.communication();
   directionControlEnabled_ =
     communication.handshake == UartHandshake::rs485Direction;
+
+  frameQueue_ = xQueueCreate(AppConfig::Modbus::frameQueueLength, sizeof(Frame));
+  if (frameQueue_ == nullptr) {
+    Serial.println("ERROR: Modbus frame queue could not be allocated.");
+    return;
+  }
+
+  // Keep the transceiver in receive mode until the UART owns the DIR pin.
   if (directionControlEnabled_) {
     pinMode(AppConfig::Modbus::directionPin, OUTPUT);
     digitalWrite(AppConfig::Modbus::directionPin, LOW);
   } else {
     pinMode(AppConfig::Modbus::directionPin, INPUT);
   }
-  frameGapMs_ = calculateFrameGapMs(communication);
+
+  serial_.setRxBufferSize(AppConfig::Modbus::receiveBufferSize);
   serial_.begin(
     communication.baudRate,
     serialConfiguration(communication),
     AppConfig::Modbus::rxPin,
     AppConfig::Modbus::txPin);
+
+  bool hardwareDirection = false;
+  if (directionControlEnabled_ && AppConfig::Modbus::hardwareDirectionControl) {
+    // In RS485 half-duplex mode the UART raises RTS (wired to DE and /RE)
+    // while it transmits and releases it when the last stop bit is sent.
+    hardwareDirection =
+      serial_.setPins(-1, -1, -1, AppConfig::Modbus::directionPin)
+      && serial_.setMode(UART_MODE_RS485_HALF_DUPLEX);
+    if (!hardwareDirection) {
+      Serial.println("ERROR: UART RS485 mode failed; using software DIR control.");
+      pinMode(AppConfig::Modbus::directionPin, OUTPUT);
+      digitalWrite(AppConfig::Modbus::directionPin, LOW);
+    }
+  }
+  directionControlEnabled_ = directionControlEnabled_ && !hardwareDirection;
+
+  // The UART detects the end of each frame in hardware, so frames are
+  // separated correctly even while the main loop is busy.
+  const uint8_t gapSymbols = frameGapSymbols(communication);
+  if (!serial_.setRxTimeout(gapSymbols)) {
+    Serial.println("ERROR: Modbus RX timeout could not be configured.");
+  }
+  serial_.onReceive([this]() { receiveFrame(); }, true);
+
   ready_ = true;
   Serial.printf(
-    "Modbus RTU slave %u ready: %lu %u%s1, handshake=%s (RX=%d, TX=%d, DIR=%d).\n",
+    "Modbus RTU slave %u ready: %lu %u%s1, DIR=%s, frame gap %u chars (RX=%d, TX=%d, DIR=%d).\n",
     communication.slaveAddress,
     static_cast<unsigned long>(communication.baudRate),
     communication.dataBits,
     parityName(communication.parity),
-    directionControlEnabled_ ? "RS485_DIR" : "NONE",
+    hardwareDirection ? "UART" : (directionControlEnabled_ ? "GPIO" : "NONE"),
+    gapSymbols,
     AppConfig::Modbus::rxPin,
     AppConfig::Modbus::txPin,
     AppConfig::Modbus::directionPin);
@@ -112,45 +153,79 @@ void ModbusRtuSlaveService::update()
     return;
   }
 
+  const uint32_t dropped = droppedFrames_.exchange(0);
+  if (dropped > 0) {
+    Serial.printf(
+      "WARNING: %lu Modbus frame(s) dropped (queue full or frame too long).\n",
+      static_cast<unsigned long>(dropped));
+  }
+
+  uint32_t stale = 0;
+  while (xQueueReceive(frameQueue_, &frame_, 0) == pdTRUE) {
+    if (millis() - frame_.receivedAt > AppConfig::Modbus::maximumResponseDelayMs) {
+      ++stale;
+      continue;
+    }
+    processFrame();
+  }
+  if (stale > 0) {
+    Serial.printf(
+      "WARNING: %lu late Modbus request(s) dropped instead of answered.\n",
+      static_cast<unsigned long>(stale));
+  }
+}
+
+void ModbusRtuSlaveService::receiveFrame()
+{
+  // Called from the UART event task after the frame gap has elapsed.
+  size_t length = 0;
+  bool tooLong = false;
   while (serial_.available() > 0) {
     const int value = serial_.read();
     if (value < 0) {
       break;
     }
-    if (receiveLength_ >= receiveBufferSize) {
-      receiveLength_ = 0;
+    if (length < sizeof(pendingFrame_.data)) {
+      pendingFrame_.data[length++] = static_cast<uint8_t>(value);
+    } else {
+      tooLong = true;
     }
-    receiveBuffer_[receiveLength_++] = static_cast<uint8_t>(value);
-    lastByteAt_ = millis();
+  }
+  if (length == 0) {
+    return;
+  }
+  if (tooLong) {
+    droppedFrames_.fetch_add(1);
+    return;
   }
 
-  if (receiveLength_ > 0
-      && millis() - lastByteAt_ >= frameGapMs_) {
-    processFrame();
-    receiveLength_ = 0;
+  pendingFrame_.length = static_cast<uint16_t>(length);
+  pendingFrame_.receivedAt = millis();
+  if (xQueueSend(frameQueue_, &pendingFrame_, 0) != pdTRUE) {
+    droppedFrames_.fetch_add(1);
   }
 }
 
 void ModbusRtuSlaveService::processFrame()
 {
-  if (receiveLength_ < 4) {
+  if (frame_.length < 4) {
     return;
   }
 
   const uint16_t receivedCrc = static_cast<uint16_t>(
-    receiveBuffer_[receiveLength_ - 2]
-    | (receiveBuffer_[receiveLength_ - 1] << 8));
-  if (calculateCrc(receiveBuffer_, receiveLength_ - 2) != receivedCrc) {
+    frame_.data[frame_.length - 2]
+    | (frame_.data[frame_.length - 1] << 8));
+  if (calculateCrc(frame_.data, frame_.length - 2) != receivedCrc) {
     return;
   }
 
-  const uint8_t address = receiveBuffer_[0];
+  const uint8_t address = frame_.data[0];
   if (address != settings_.communication().slaveAddress && address != 0) {
     return;
   }
   const bool broadcast = address == 0;
 
-  switch (receiveBuffer_[1]) {
+  switch (frame_.data[1]) {
     case readHoldingRegistersFunction:
       processReadHoldingRegisters(broadcast);
       break;
@@ -162,7 +237,7 @@ void ModbusRtuSlaveService::processFrame()
       break;
     default:
       if (!broadcast) {
-        sendException(receiveBuffer_[1], illegalFunctionException);
+        sendException(frame_.data[1], illegalFunctionException);
       }
       break;
   }
@@ -173,13 +248,13 @@ void ModbusRtuSlaveService::processReadHoldingRegisters(bool broadcast)
   if (broadcast) {
     return;
   }
-  if (receiveLength_ != 8) {
+  if (frame_.length != 8) {
     sendException(readHoldingRegistersFunction, illegalValueException);
     return;
   }
 
-  const uint16_t startAddress = readBigEndian16(&receiveBuffer_[2]);
-  const uint16_t quantity = readBigEndian16(&receiveBuffer_[4]);
+  const uint16_t startAddress = readBigEndian16(&frame_.data[2]);
+  const uint16_t quantity = readBigEndian16(&frame_.data[4]);
   if (quantity == 0 || quantity > AppConfig::Modbus::maximumReadRegisters) {
     sendException(readHoldingRegistersFunction, illegalValueException);
     return;
@@ -207,15 +282,15 @@ void ModbusRtuSlaveService::processReadHoldingRegisters(bool broadcast)
 
 void ModbusRtuSlaveService::processWriteSingleRegister(bool broadcast)
 {
-  if (receiveLength_ != 8) {
+  if (frame_.length != 8) {
     if (!broadcast) {
       sendException(writeSingleRegisterFunction, illegalValueException);
     }
     return;
   }
 
-  const uint16_t address = readBigEndian16(&receiveBuffer_[2]);
-  const uint16_t value = readBigEndian16(&receiveBuffer_[4]);
+  const uint16_t address = readBigEndian16(&frame_.data[2]);
+  const uint16_t value = readBigEndian16(&frame_.data[4]);
   if (!valueBoxes_.writeHoldingRegisters(address, &value, 1)) {
     if (!broadcast) {
       sendException(writeSingleRegisterFunction, illegalAddressException);
@@ -224,26 +299,26 @@ void ModbusRtuSlaveService::processWriteSingleRegister(bool broadcast)
   }
 
   if (!broadcast) {
-    sendFrame(receiveBuffer_, 6);
+    sendFrame(frame_.data, 6);
   }
 }
 
 void ModbusRtuSlaveService::processWriteMultipleRegisters(bool broadcast)
 {
-  if (receiveLength_ < 9) {
+  if (frame_.length < 9) {
     if (!broadcast) {
       sendException(writeMultipleRegistersFunction, illegalValueException);
     }
     return;
   }
 
-  const uint16_t startAddress = readBigEndian16(&receiveBuffer_[2]);
-  const uint16_t quantity = readBigEndian16(&receiveBuffer_[4]);
-  const uint8_t byteCount = receiveBuffer_[6];
+  const uint16_t startAddress = readBigEndian16(&frame_.data[2]);
+  const uint16_t quantity = readBigEndian16(&frame_.data[4]);
+  const uint8_t byteCount = frame_.data[6];
   if (quantity == 0
       || quantity > AppConfig::Modbus::maximumReadRegisters
       || byteCount != quantity * 2
-      || receiveLength_ != static_cast<size_t>(9 + byteCount)) {
+      || frame_.length != static_cast<size_t>(9 + byteCount)) {
     if (!broadcast) {
       sendException(writeMultipleRegistersFunction, illegalValueException);
     }
@@ -252,7 +327,7 @@ void ModbusRtuSlaveService::processWriteMultipleRegisters(bool broadcast)
 
   uint16_t values[AppConfig::Modbus::maximumReadRegisters] = {};
   for (uint16_t index = 0; index < quantity; ++index) {
-    values[index] = readBigEndian16(&receiveBuffer_[7 + index * 2]);
+    values[index] = readBigEndian16(&frame_.data[7 + index * 2]);
   }
   if (!valueBoxes_.writeHoldingRegisters(startAddress, values, quantity)) {
     if (!broadcast) {
@@ -265,10 +340,10 @@ void ModbusRtuSlaveService::processWriteMultipleRegisters(bool broadcast)
     uint8_t response[6] = {
       settings_.communication().slaveAddress,
       writeMultipleRegistersFunction,
-      receiveBuffer_[2],
-      receiveBuffer_[3],
-      receiveBuffer_[4],
-      receiveBuffer_[5]
+      frame_.data[2],
+      frame_.data[3],
+      frame_.data[4],
+      frame_.data[5]
     };
     sendFrame(response, sizeof(response));
   }
@@ -290,7 +365,7 @@ void ModbusRtuSlaveService::sendFrame(
   const uint8_t *payload,
   size_t payloadLength)
 {
-  uint8_t response[receiveBufferSize] = {};
+  uint8_t response[AppConfig::Modbus::maximumFrameSize] = {};
   if (payloadLength + 2 > sizeof(response)) {
     return;
   }
@@ -300,16 +375,18 @@ void ModbusRtuSlaveService::sendFrame(
   response[payloadLength] = static_cast<uint8_t>(crc);
   response[payloadLength + 1] = static_cast<uint8_t>(crc >> 8);
 
-  if (directionControlEnabled_) {
-    digitalWrite(AppConfig::Modbus::directionPin, HIGH);
-    delayMicroseconds(50);
+  if (!directionControlEnabled_) {
+    // Hardware or transceiver-controlled direction: queue and return.
+    serial_.write(response, payloadLength + 2);
+    return;
   }
+
+  digitalWrite(AppConfig::Modbus::directionPin, HIGH);
+  delayMicroseconds(50);
   serial_.write(response, payloadLength + 2);
   serial_.flush();
-  if (directionControlEnabled_) {
-    delayMicroseconds(50);
-    digitalWrite(AppConfig::Modbus::directionPin, LOW);
-  }
+  delayMicroseconds(50);
+  digitalWrite(AppConfig::Modbus::directionPin, LOW);
 }
 
 uint16_t ModbusRtuSlaveService::calculateCrc(
@@ -327,4 +404,3 @@ uint16_t ModbusRtuSlaveService::calculateCrc(
   }
   return crc;
 }
-

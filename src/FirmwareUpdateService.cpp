@@ -2,16 +2,17 @@
 
 #include <Update.h>
 
+#include "UiText.h"
 #include "WatchdogService.h"
 
 namespace {
 
 constexpr char requiredFirmwareFilename[] = "firmware.bin";
 
-String updateErrorMessage(const __FlashStringHelper *prefix)
+String updateErrorMessage(const char *prefix)
 {
   String message(prefix);
-  message += F(": ");
+  message += ": ";
   message += Update.errorString();
   return message;
 }
@@ -30,23 +31,23 @@ void FirmwareUpdateService::beginUpload(const String &filename)
   uploadSucceeded_ = false;
   responseStatusCode_ = 400;
   bytesWritten_ = 0;
-  message_ = F("Yazılım dosyası alınamadı.");
+  message_ = UI_TEXT("Yazılım dosyası alınamadı.");
 
   if (filename != requiredFirmwareFilename) {
     fail(
-      F("Dosya adı firmware.bin olmalıdır."),
+      UI_TEXT("Dosya adı firmware.bin olmalıdır."),
       400,
       false);
     return;
   }
 
   if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
-    fail(updateErrorMessage(F("OTA başlatılamadı")), 500, false);
+    fail(updateErrorMessage(UI_TEXT("OTA başlatılamadı")), 500, false);
     return;
   }
 
   uploadActive_ = true;
-  message_ = F("Firmware yükleniyor.");
+  message_ = UI_TEXT("Firmware yükleniyor.");
   Serial.println("OTA upload started: firmware.bin");
   watchdog_.feed();
 }
@@ -62,7 +63,7 @@ void FirmwareUpdateService::writeChunk(uint8_t *data, size_t size)
   watchdog_.feed();
 
   if (written != size) {
-    fail(updateErrorMessage(F("Firmware yazılamadı")), 500, true);
+    fail(updateErrorMessage(UI_TEXT("Firmware yazılamadı")), 500, true);
     return;
   }
 
@@ -77,12 +78,12 @@ void FirmwareUpdateService::finishUpload()
 
   watchdog_.feed();
   if (bytesWritten_ == 0) {
-    fail(F("Firmware dosyası boş."), 400, true);
+    fail(UI_TEXT("Firmware dosyası boş."), 400, true);
     return;
   }
 
   if (!Update.end(true)) {
-    fail(updateErrorMessage(F("Firmware doğrulanamadı")), 400, false);
+    fail(updateErrorMessage(UI_TEXT("Firmware doğrulanamadı")), 400, false);
     return;
   }
 
@@ -90,7 +91,7 @@ void FirmwareUpdateService::finishUpload()
   uploadActive_ = false;
   uploadSucceeded_ = true;
   responseStatusCode_ = 200;
-  message_ = F("Güncelleme tamamlandı. Cihaz yeniden başlatılıyor.");
+  message_ = UI_TEXT("Güncelleme tamamlandı. Cihaz yeniden başlatılıyor.");
   Serial.printf(
     "OTA upload completed: %u bytes\n",
     static_cast<unsigned int>(bytesWritten_));
@@ -102,7 +103,7 @@ void FirmwareUpdateService::abortUpload()
     return;
   }
 
-  fail(F("Firmware yüklemesi bağlantı kesildiği için iptal edildi."), 400, true);
+  fail(UI_TEXT("Firmware yüklemesi bağlantı kesildiği için iptal edildi."), 400, true);
 }
 
 bool FirmwareUpdateService::uploadStarted() const

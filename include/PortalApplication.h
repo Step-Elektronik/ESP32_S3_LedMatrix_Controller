@@ -11,6 +11,7 @@ class PanelDisplay;
 class PanelSleepApplication;
 class SettingsService;
 class TemperatureApplication;
+class TimeSyncApplication;
 class ValueBoxApplication;
 class WiFiApplication;
 
@@ -25,6 +26,7 @@ public:
     ValueBoxApplication &valueBoxes,
     PanelSleepApplication &panelSleep,
     WiFiApplication &wifi,
+    TimeSyncApplication &timeSync,
     BootGuardService &bootGuard,
     FirmwareUpdateService &firmwareUpdate);
 
@@ -32,7 +34,14 @@ public:
   void update();
 
 private:
+  using Handler = void (PortalApplication::*)();
+
   void configureRoutes();
+  void onAuthorized(const char *uri, HTTPMethod method, Handler handler);
+  bool requestFromStation();
+  bool authorized();
+  bool authorize();
+
   void sendHomePage();
   void sendSettingsPage();
   void sendI18nScript();
@@ -51,6 +60,9 @@ private:
   void saveContentSettings();
   void savePanelSettings();
   void saveClockSettings();
+  void saveSleepSettings();
+  void saveTimeSyncSettings();
+  void saveTemperatureSensorSettings();
   void saveAlarmSettings();
   void saveCommunicationSettings();
   void saveNetworkSettings();
@@ -58,10 +70,11 @@ private:
   void handleFirmwareUpload();
   void finishFirmwareUploadRequest();
 
-  String buildSettingsJson() const;
+  String buildSettingsJson();
   String buildWifiStatusJson() const;
   String buildContentJson() const;
   String buildTemperatureJson() const;
+  void appendSensorJson(String &json) const;
 
   void sendJson(
     bool success,
@@ -80,6 +93,7 @@ private:
   ValueBoxApplication &valueBoxes_;
   PanelSleepApplication &panelSleep_;
   WiFiApplication &wifi_;
+  TimeSyncApplication &timeSync_;
   BootGuardService &bootGuard_;
   FirmwareUpdateService &firmwareUpdate_;
   WebServer webServer_;
@@ -87,4 +101,5 @@ private:
   uint32_t colorTestStartedAt_ = 0;
   bool restartPending_ = false;
   uint32_t restartScheduledAt_ = 0;
+  bool uploadAuthorized_ = false;
 };

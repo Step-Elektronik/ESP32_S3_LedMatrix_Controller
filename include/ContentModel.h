@@ -6,11 +6,14 @@
 #include "AppConfig.h"
 #include "FontModel.h"
 
-constexpr uint16_t contentSchemaVersion = 6;
+constexpr uint16_t contentSchemaVersion = 7;
 constexpr uint8_t maxBoxesPerPanel = 2;
 constexpr uint8_t maxTextBoxesPerPanel = maxBoxesPerPanel;
 constexpr uint8_t maxContentItems = AppConfig::maxPanelCount * maxBoxesPerPanel;
 constexpr size_t maxContentTextLength = 48;
+// ValueBox reuses the text field as a unit suffix such as "°C" or " bar".
+constexpr size_t maxValueSuffixLength = 15;
+constexpr uint8_t maxValueDecimals = 3;
 
 enum class ContentBoxKind : uint8_t {
   textBox = 0,
@@ -21,8 +24,12 @@ enum class ContentType : uint8_t {
   text = 0,
   time = 1,
   date = 2,
-  temperature = 3
+  temperature = 3,
+  humidity = 4
 };
+
+// Content cycle order follows the enum values up to this type.
+constexpr ContentType lastContentType = ContentType::humidity;
 
 constexpr uint8_t contentTypeMask(ContentType type)
 {
@@ -33,7 +40,8 @@ constexpr uint8_t allCycleContentMask =
   contentTypeMask(ContentType::text)
   | contentTypeMask(ContentType::time)
   | contentTypeMask(ContentType::date)
-  | contentTypeMask(ContentType::temperature);
+  | contentTypeMask(ContentType::temperature)
+  | contentTypeMask(ContentType::humidity);
 constexpr uint16_t minimumCycleIntervalSeconds = 1;
 constexpr uint16_t maximumCycleIntervalSeconds = 3600;
 constexpr uint16_t defaultCycleIntervalSeconds = 5;
@@ -67,9 +75,16 @@ enum class CounterDirection : uint8_t {
   down = 1
 };
 
+// Number format of temperature and humidity content.
 enum class TemperatureDisplayFormat : uint8_t {
   decimal = 0,
   integer = 1
+};
+
+// Area in which a box is clipped and its scrolling text wraps around.
+enum class ScrollArea : uint8_t {
+  panel = 0,
+  display = 1
 };
 
 struct ContentItemSettings {
@@ -98,6 +113,10 @@ struct ContentItemSettings {
   TemperatureDisplayFormat temperatureDisplayFormat =
     TemperatureDisplayFormat::decimal;
   uint8_t fontId = FontModel::defaultFontId;
+  ScrollArea scrollArea = ScrollArea::panel;
+  // Float: digits after the decimal point. Integer: fixed decimal point
+  // position, e.g. 1234 with 2 decimals is shown as 12.34.
+  uint8_t valueDecimals = 0;
 };
 
 struct ContentSettings {

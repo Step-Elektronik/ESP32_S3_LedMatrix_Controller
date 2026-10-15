@@ -43,6 +43,15 @@ private:
     bool scrollTourCompleted = false;
   };
 
+  // Pixel rectangle a box is clipped to; right and bottom are exclusive.
+  struct ClipArea {
+    int16_t left = 0;
+    int16_t top = 0;
+    int16_t right = 0;
+    int16_t bottom = 0;
+  };
+
+  ClipArea clipArea(const ContentItemSettings &item) const;
   void draw();
   void updateCycle(
     uint8_t index,
@@ -83,7 +92,8 @@ private:
     uint16_t color,
     bool hideColon,
     TextRotation rotation,
-    uint8_t fontId);
+    uint8_t fontId,
+    const ClipArea &clip);
 
   PanelDisplay &panel_;
   ClockApplication &clock_;

@@ -70,28 +70,31 @@
   <text class="label" x="132" y="315">DS3231 RTC</text>
 
   <rect class="box source" x="42" y="357" width="180" height="56"/>
-  <text class="label" x="132" y="385">SHT40 sensörü</text>
+  <text class="label" x="132" y="377">Sıcaklık/nem</text>
+  <text class="small" x="132" y="397">TMP112 / SHT40 / HDC2022</text>
 
   <rect class="box source" x="42" y="427" width="180" height="56"/>
   <text class="label" x="132" y="449">RS485</text>
-  <text class="small" x="132" y="469">Modbus RTU</text>
+  <text class="small" x="132" y="469">Modbus RTU, donanım DIR</text>
 
   <rect class="box source" x="42" y="497" width="180" height="56"/>
-  <text class="label" x="132" y="519">GPIO21</text>
+  <text class="label" x="132" y="519">GPIO12</text>
   <text class="small" x="132" y="539">Dijital giriş</text>
 
   <!-- Services -->
   <rect class="box service" x="278" y="123" width="180" height="56"/>
-  <text class="label" x="368" y="151">HTTP portalı</text>
+  <text class="label" x="368" y="143">HTTP portalı</text>
+  <text class="small" x="368" y="163">İsteğe bağlı STA girişi</text>
 
   <rect class="box service" x="278" y="217" width="180" height="56"/>
   <text class="label" x="368" y="245">OTA güncelleme</text>
 
   <rect class="box service" x="278" y="287" width="180" height="56"/>
-  <text class="label" x="368" y="315">Saat servisi</text>
+  <text class="label" x="368" y="307">Saat servisi</text>
+  <text class="small" x="368" y="327">RTC + NTP eşitleme</text>
 
   <rect class="box service" x="278" y="357" width="180" height="56"/>
-  <text class="label" x="368" y="385">Sıcaklık servisi</text>
+  <text class="label" x="368" y="385">Sıcaklık/nem servisi</text>
 
   <rect class="box service" x="278" y="442" width="180" height="56"/>
   <text class="label" x="368" y="470">ValueBox servisi</text>

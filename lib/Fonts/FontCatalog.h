@@ -9,7 +9,8 @@
 namespace FontCatalog {
 
 constexpr uint8_t firstGlyphCode = 0x20;
-constexpr uint8_t lastGlyphCode = 0x8B;
+// 0x7F-0x8B: Turkish letters and degree sign, 0x8C-0x9B: German/Spanish.
+constexpr uint8_t lastGlyphCode = 0x9B;
 constexpr size_t generatedGlyphBufferSize = 512;
 
 struct GlyphView {
@@ -41,8 +42,9 @@ void getTextBounds(
   uint16_t &width,
   uint16_t &height);
 
-// Converts UTF-8 Turkish characters and the degree sign to the common private
-// glyph range rendered by every font in this catalog.
+// Converts UTF-8 Turkish, German and Spanish letters and the degree sign to
+// the common private glyph range rendered by every font in this catalog.
+// Unsupported characters become '?'.
 size_t encodeText(
   uint8_t fontId,
   const char *input,

@@ -2,8 +2,13 @@
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
+#include <atomic>
 #include <cstddef>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 #include <stdint.h>
+
+#include "AppConfig.h"
 
 class ValueBoxApplication;
 class SettingsService;
@@ -18,8 +23,13 @@ public:
   void update();
 
 private:
-  static constexpr size_t receiveBufferSize = 256;
+  struct Frame {
+    uint32_t receivedAt;
+    uint16_t length;
+    uint8_t data[AppConfig::Modbus::maximumFrameSize];
+  };
 
+  void receiveFrame();
   void processFrame();
   void processReadHoldingRegisters(bool broadcast);
   void processWriteSingleRegister(bool broadcast);
@@ -31,12 +41,11 @@ private:
   ValueBoxApplication &valueBoxes_;
   SettingsService &settings_;
   HardwareSerial serial_;
-  uint8_t receiveBuffer_[receiveBufferSize] = {};
-  size_t receiveLength_ = 0;
-  uint32_t lastByteAt_ = 0;
-  uint32_t frameGapMs_ = 5;
+  QueueHandle_t frameQueue_ = nullptr;
+  // receiveFrame() runs in the UART event task; frame_ is used by the loop.
+  Frame pendingFrame_ = {};
+  Frame frame_ = {};
+  std::atomic<uint32_t> droppedFrames_{0};
   bool directionControlEnabled_ = true;
   bool ready_ = false;
 };
-
-

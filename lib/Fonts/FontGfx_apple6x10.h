@@ -5,8 +5,9 @@
 #include <stdint.h>
 
 // Adafruit GFX font Apple6x10 size: 6x10
-// Extended with Turkish glyphs and degree sign in the private 0x7F-0x8B range. UTF-8 text
-// must be converted with Apple6x10EncodeUtf8() before it is drawn.
+// Extended with Turkish glyphs and degree sign in the private 0x7F-0x8B range, and German and
+// Spanish letter codes in 0x8C-0x9B. UTF-8 text must be converted with Apple6x10EncodeUtf8()
+// before it is drawn.
 
 const uint8_t Apple6x10Bitmaps[] PROGMEM = {
   0xFA,	// exclam
@@ -226,7 +227,7 @@ const GFXglyph Apple6x10Glyphs[] PROGMEM = {
   { 431, 5, 7, 6, 0, -8 },	// odieresis
   { 436, 5, 6, 6, 0, -6 },	// scedilla
   { 440, 5, 7, 6, 0, -8 },	// udieresis
-  { 445, 4, 4, 6, 1, -9 }	// degree
+  { 445, 4, 4, 6, 1, -8 }	// degree, top aligned with the digits
 };
 
 const GFXfont Apple6x10 PROGMEM = {
@@ -248,9 +249,45 @@ constexpr uint8_t Apple6x10TurkishSmallScedilla = 0x89;
 constexpr uint8_t Apple6x10TurkishSmallUdieresis = 0x8A;
 constexpr uint8_t Apple6x10Degree = 0x8B;
 
+// German and Spanish letters. No font contains them natively; FontCatalog
+// synthesizes them from each font's own base letter and accent geometry.
+constexpr uint8_t Apple6x10Adieresis = 0x8C;
+constexpr uint8_t Apple6x10SmallAdieresis = 0x8D;
+constexpr uint8_t Apple6x10Aacute = 0x8E;
+constexpr uint8_t Apple6x10SmallAacute = 0x8F;
+constexpr uint8_t Apple6x10Eacute = 0x90;
+constexpr uint8_t Apple6x10SmallEacute = 0x91;
+constexpr uint8_t Apple6x10Iacute = 0x92;
+constexpr uint8_t Apple6x10SmallIacute = 0x93;
+constexpr uint8_t Apple6x10Oacute = 0x94;
+constexpr uint8_t Apple6x10SmallOacute = 0x95;
+constexpr uint8_t Apple6x10Uacute = 0x96;
+constexpr uint8_t Apple6x10SmallUacute = 0x97;
+constexpr uint8_t Apple6x10Ntilde = 0x98;
+constexpr uint8_t Apple6x10SmallNtilde = 0x99;
+constexpr uint8_t Apple6x10InvertedExclamation = 0x9A;
+constexpr uint8_t Apple6x10InvertedQuestion = 0x9B;
+constexpr uint8_t Apple6x10LastExtendedGlyph = Apple6x10InvertedQuestion;
+
 inline uint8_t Apple6x10GlyphForCodePoint(uint32_t codePoint)
 {
   switch (codePoint) {
+    case 0x00C4: return Apple6x10Adieresis;
+    case 0x00E4: return Apple6x10SmallAdieresis;
+    case 0x00C1: return Apple6x10Aacute;
+    case 0x00E1: return Apple6x10SmallAacute;
+    case 0x00C9: return Apple6x10Eacute;
+    case 0x00E9: return Apple6x10SmallEacute;
+    case 0x00CD: return Apple6x10Iacute;
+    case 0x00ED: return Apple6x10SmallIacute;
+    case 0x00D3: return Apple6x10Oacute;
+    case 0x00F3: return Apple6x10SmallOacute;
+    case 0x00DA: return Apple6x10Uacute;
+    case 0x00FA: return Apple6x10SmallUacute;
+    case 0x00D1: return Apple6x10Ntilde;
+    case 0x00F1: return Apple6x10SmallNtilde;
+    case 0x00A1: return Apple6x10InvertedExclamation;
+    case 0x00BF: return Apple6x10InvertedQuestion;
     case 0x00C7: return Apple6x10TurkishCcedilla;
     case 0x011E: return Apple6x10TurkishGbreve;
     case 0x0130: return Apple6x10TurkishIdot;
@@ -329,6 +366,11 @@ inline size_t Apple6x10EncodeUtf8(
       // U+2103 CELSIUS SIGN is rendered as the shared degree glyph plus C.
       output[writeIndex++] = static_cast<char>(Apple6x10Degree);
       output[writeIndex++] = 'C';
+    } else if (codePoint == 0x00DF && writeIndex + 2 < outputSize) {
+      // German sharp s has no compact bitmap form; "ss" is its official
+      // replacement spelling.
+      output[writeIndex++] = 's';
+      output[writeIndex++] = 's';
     } else {
       output[writeIndex++] =
         static_cast<char>(Apple6x10GlyphForCodePoint(codePoint));

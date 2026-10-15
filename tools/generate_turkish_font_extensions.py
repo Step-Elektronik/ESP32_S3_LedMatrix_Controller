@@ -325,36 +325,34 @@ def breve_from_u(source: Glyph, maximum_width: int) -> list[list[bool]]:
     return mark
 
 
-def custom_degree(source: Glyph) -> Glyph:
-    pixels = trim_pixels(source.pixels)
-    source_height = len(pixels)
-    source_width = len(pixels[0])
-    target_height = max(3, min(source_height, round(source_height * 0.6)))
-    target_width = max(3, round(source_width * target_height / source_height))
-    pixels = resize_pixels(pixels, target_width, target_height)
-    advance = max(target_width + 1, min(source.x_advance, target_width + 2))
-    return Glyph(pixels, advance, source.x_offset, source.y_offset)
+def degree_ring(diameter: int) -> list[list[bool]]:
+    """Closed degree ring: a solid dot at 2 px, a square ring at 3 px and a
+    rounded ring above that, so no arc is lost at small sizes."""
+    if diameter <= 2:
+        return [[True] * diameter for _ in range(diameter)]
+    if diameter == 3:
+        return [[True, True, True], [True, False, True], [True, True, True]]
+    pixels = [[False] * diameter for _ in range(diameter)]
+    for index in range(1, diameter - 1):
+        pixels[0][index] = pixels[-1][index] = True
+        pixels[index][0] = pixels[index][-1] = True
+    return pixels
 
 
-def bitmap_font_degree(font_name: str, source: Glyph) -> Glyph:
-    if font_name == "GohuFont6x11":
-        # Nearest-neighbour reduction of this font's 5x5 "o" to 3x3 drops
-        # the right and bottom arcs. Keep a symmetric, top-aligned 4x4 ring.
-        return Glyph(
-            [
-                [False, True, True, False],
-                [True, False, False, True],
-                [True, False, False, True],
-                [False, True, True, False],
-            ],
-            6,
-            1,
-            -9,
-        )
-    return custom_degree(source)
+def bitmap_font_degree(glyphs: dict[str, Glyph]) -> Glyph:
+    # Shrinking the font's own "o" dropped the right and bottom arcs and left
+    # the sign at x-height. Draw a closed ring sized from the digit height and
+    # align its top with the tallest digit or capital, as in "23°C".
+    references = [glyphs[character] for character in "0123456789C"]
+    cap_height = max(glyphs[character].height for character in "0123456789")
+    top = min(glyph.y_offset for glyph in references)
+    diameter = 2 if cap_height <= 3 else (3 if cap_height <= 6 else 4)
+    digit_advance = glyphs["0"].x_advance
+    x_offset = 1 if digit_advance - diameter >= 2 else 0
+    return Glyph(degree_ring(diameter), x_offset + diameter + 1, x_offset, top)
 
 
-def decorate_bitmap_font(font_name: str, glyphs: dict[str, Glyph]) -> list[Glyph]:
+def decorate_bitmap_font(glyphs: dict[str, Glyph]) -> list[Glyph]:
     dot = trim_pixels(glyphs["."].pixels)
     comma = trim_pixels(glyphs[","].pixels)
     generated: list[Glyph] = []
@@ -390,7 +388,7 @@ def decorate_bitmap_font(font_name: str, glyphs: dict[str, Glyph]) -> list[Glyph
             add_mark(points, mark, mark_left, mark_top)
         generated.append(glyph_from_points(points, base.x_advance))
 
-    generated.append(bitmap_font_degree(font_name, glyphs["o"]))
+    generated.append(bitmap_font_degree(glyphs))
     return generated
 
 
@@ -704,7 +702,7 @@ def main() -> None:
             continue
         header = font_directory / BITMAP_FONT_HEADERS[font_name]
         source_glyphs = parse_gfx_font(header, font_name)
-        generated[font_name] = decorate_bitmap_font(font_name, source_glyphs)
+        generated[font_name] = decorate_bitmap_font(source_glyphs)
 
     validate_extensions(generated)
     output = generate_header(generated)

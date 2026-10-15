@@ -7,6 +7,7 @@
 #include "AlarmModel.h"
 #include "AppConfig.h"
 #include "ContentModel.h"
+#include "TemperatureSensorModel.h"
 
 enum class PanelConnectionStyle : uint8_t {
   topLeftDown = 1,
@@ -37,6 +38,9 @@ struct NetworkSettings {
   String apPassword;
   String staSsid;
   String staPassword;
+  // When true, portal requests arriving through the STA network must log in
+  // (HTTP Digest, user "admin", AP password). Off by default.
+  bool stationPortalAuthentication = false;
 };
 
 enum class UartParity : uint8_t {
@@ -65,6 +69,12 @@ struct PanelSleepSettings {
   ScheduleDayMode dayMode = ScheduleDayMode::everyDay;
 };
 
+struct TimeSyncSettings {
+  bool ntpEnabled = false;
+  String ntpServer;
+  String timeZone;
+};
+
 class SettingsService {
 public:
   bool begin();
@@ -73,13 +83,18 @@ public:
   const NetworkSettings &network() const;
   const CommunicationSettings &communication() const;
   const PanelSleepSettings &sleep() const;
+  const TimeSyncSettings &timeSync() const;
+  const TemperatureSensorSettings &temperatureSensor() const;
   const AlarmSettings &alarms() const;
   const ContentSettings &content() const;
+  bool usesDefaultApPassword() const;
 
   bool savePanel(const PanelSettings &settings);
   bool saveNetwork(const NetworkSettings &settings);
   bool saveCommunication(const CommunicationSettings &settings);
   bool saveSleep(const PanelSleepSettings &settings);
+  bool saveTimeSync(const TimeSyncSettings &settings);
+  bool saveTemperatureSensor(const TemperatureSensorSettings &settings);
   bool saveAlarms(const AlarmSettings &settings);
   bool saveContent(const ContentSettings &settings);
   bool factoryReset();
@@ -90,6 +105,12 @@ public:
     const CommunicationSettings &settings,
     String &error);
   static bool validateSleep(const PanelSleepSettings &settings, String &error);
+  static bool validateTimeSync(const TimeSyncSettings &settings, String &error);
+  static bool validateTemperatureSensor(
+    const TemperatureSensorSettings &settings,
+    String &error);
+  // True when a TextBox shows humidity directly or in its content cycle.
+  static bool contentUsesHumidity(const ContentSettings &settings);
   static bool validateAlarms(const AlarmSettings &settings, String &error);
   static bool validateContent(
     const ContentSettings &settings,
@@ -98,12 +119,16 @@ public:
 
 private:
   void loadDefaults();
+  bool loadContent();
+  bool loadTemperatureSensor();
 
   Preferences preferences_;
   PanelSettings panel_;
   NetworkSettings network_;
   CommunicationSettings communication_;
   PanelSleepSettings sleep_;
+  TimeSyncSettings timeSync_;
+  TemperatureSensorSettings temperatureSensor_;
   AlarmSettings alarms_;
   ContentSettings content_;
   bool ready_ = false;

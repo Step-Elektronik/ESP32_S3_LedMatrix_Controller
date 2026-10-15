@@ -1,14 +1,14 @@
 # ESP32-S3 RGB LED Matrix Controller
 
-ESP32-S3 tabanlı, 32×16 HUB75/P10 RGB LED paneller için web arayüzlü kontrol cihazı firmware'idir. Proje; metin, saat, tarih, sıcaklık ve dışarıdan alınan sayısal değerleri bir veya daha fazla panel üzerinde konumlandırabilir. İçerik ayarları sürükle-bırak web editörüyle hazırlanır ve ESP32-S3'ün kalıcı belleğinde saklanır.
+ESP32-S3 tabanlı, 32×16 HUB75/P10 RGB LED paneller için web arayüzlü kontrol cihazı firmware'idir. Proje; metin, saat, tarih, sıcaklık, nem ve dışarıdan alınan sayısal değerleri bir veya daha fazla panel üzerinde konumlandırabilir. İçerik ayarları sürükle-bırak web editörüyle hazırlanır ve ESP32-S3'ün kalıcı belleğinde saklanır.
 
-Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek zaman saati, SHT40 sıcaklık sensörü, programlanabilir alarm rölesi, panel uyku zamanlaması, Wi-Fi erişim noktası ve OTA güncelleme özelliklerini içerir.
+Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek zaman saati, seçilebilir sıcaklık/nem sensörü (TMP112, SHT40, HDC2022), programlanabilir alarm rölesi, panel uyku zamanlaması, Wi-Fi erişim noktası ve OTA güncelleme özelliklerini içerir.
 
 ## Proje durumu
 
 | Özellik | Değer |
 |---|---|
-| Firmware sürümü | `0.9.0` |
+| Firmware sürümü | `0.9.1` |
 | Mikrodenetleyici hedefi | ESP32-S3 |
 | PlatformIO kartı | `esp32-s3-devkitc1-n8r2` |
 | Önerilen modül | ESP32-S3-WROOM-1-N8R2 |
@@ -31,21 +31,24 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 - Web üzerinde gerçek font bitmap'leriyle piksel hassasiyetinde önizleme
 - Sürükle-bırak TextBox ve ValueBox konumlandırma
 - 59 Adafruit GFX fontu
-- Her font için Türkçe karakterler ve `°` derece işareti
-- Saat, tarih, sıcaklık ve metin arasında otomatik içerik döngüsü
+- Her font için Türkçe karakterler ve `°` derece işareti; Almanca/İspanyolca harfler fonttan sentezlenir
+- Saat, tarih, sıcaklık, nem ve metin arasında otomatik içerik döngüsü
 - Dört yönde, engellemeyen kayar yazı
 - 0°, 90°, 180° ve 270° kutu döndürme
+- Kutu başına gösterim alanı: kendi paneline kırpma veya tüm ekran
 - RGB renk ve kaydırma hızı ayarı
-- DS3231 üzerinden pil destekli saat/tarih
-- SHT40 üzerinden sıcaklık ölçümü
-- Modbus RTU slave üzerinden ValueBox güncelleme
-- GPIO21 yükselen kenar sayacı
+- DS3231 üzerinden pil destekli saat/tarih, STA bağlıyken isteğe bağlı NTP eşitleme
+- TMP112, SHT40 veya HDC2022 ile sıcaklık; SHT40/HDC2022 ile nem ölçümü; sensöre özgü ayarlar ve kalibrasyon düzeltmesi
+- Modbus RTU slave üzerinden ValueBox güncelleme; donanım RS485 yön kontrolü ve donanım çerçeve ayırma
+- ValueBox için ondalık basamak/ondalık nokta kaydırma ve birim son eki
+- GPIO12 yükselen kenar sayacı; ana döngüden bağımsız 1 ms örnekleme
 - En fazla 10 programlanabilir alarm
 - Zamanlanmış panel karartma/uyku işlevi
 - AP+STA Wi-Fi, captive portal ve bağlantı durum göstergesi
 - Web üzerinden `firmware.bin` OTA güncellemesi
+- İsteğe bağlı olarak yerel ağdan (STA) erişimde HTTP Digest girişi; kayıtlı parolalar tarayıcıya gönderilmez
 - NVS/Preferences üzerinde kalıcı ayarlar ve eski şemaları otomatik yükseltme
-- Watchdog ve tekrarlayan hatalı açılışlarda fabrika ayarına dönüş koruması
+- Watchdog ve art arda çöken açılışlarda fabrika ayarına dönüş koruması
 
 ## Sistem mimarisi
 
@@ -63,7 +66,7 @@ Temel sistem için aşağıdaki parçalar gerekir:
 - 32×16 HUB75/P10 RGB LED panel; 1/4 veya 1/8 scan
 - HUB75 sinyalleri için tercihen iki adet `74AHCT245` seviye çevirici
 - DS3231 RTC ve yedek pili
-- SHT40 sıcaklık/nem sensörü
+- Sıcaklık sensörü: TMP112 (yalnızca sıcaklık), SHT40 veya HDC2022 (sıcaklık ve nem)
 - 3.3 V RS485 transceiver; örneğin ST3485 veya MAX3485 sınıfı
 - Alarm çıkışı için MOSFET/transistörlü röle sürücüsü ve flyback diyodu
 - Aktif buzzer veya uygun buzzer sürücü katı
@@ -106,16 +109,16 @@ GPIO8'in `C` adres hattına atanması bilinçlidir. Sinyalleri GPIO numara sıra
 
 | İşlev | GPIO | Harici bağlantı | Elektriksel davranış |
 |---|---:|---|---|
-| I²C SDA | GPIO1 | DS3231 SDA + SHT40 SDA | 3.3 V pull-up gerekir |
-| I²C SCL | GPIO2 | DS3231 SCL + SHT40 SCL | 3.3 V pull-up gerekir |
-| Buzzer | GPIO14 | Buzzer sürücü girişi | Aktif HIGH, açılışta kısa darbeler |
-| AP istemci LED'i | GPIO12 | Direnç → LED → GND | Aktif HIGH, 1 saniye aralıkla yanıp söner |
-| STA bağlantı LED'i | GPIO13 | Direnç → LED → GND | Aktif HIGH, 1 saniye aralıkla yanıp söner |
+| I²C SDA | GPIO1 | DS3231 SDA + sensör SDA | 3.3 V pull-up gerekir |
+| I²C SCL | GPIO2 | DS3231 SCL + sensör SCL | 3.3 V pull-up gerekir |
+| Buzzer | GPIO13 | Buzzer sürücü girişi | Aktif HIGH, açılışta kısa darbeler |
+| AP istemci LED'i | GPIO14 | Direnç → LED → GND | Aktif HIGH, 1 saniye aralıkla yanıp söner |
+| STA bağlantı LED'i | GPIO21 | Direnç → LED → GND | Aktif HIGH, 1 saniye aralıkla yanıp söner |
 | Alarm rölesi | GPIO42 | Röle sürücü girişi | Aktif HIGH |
 | Modbus RX | GPIO39 | RS485 transceiver `RO` | UART1 RX |
 | Modbus TX | GPIO40 | RS485 transceiver `DI` | UART1 TX |
-| Modbus DIR | GPIO41 | RS485 `DE` + `/RE` | HIGH gönderme, LOW alma |
-| Dijital sayaç | GPIO21 | Korunmuş dijital giriş | Dahili pull-down, LOW→HIGH sayımı |
+| Modbus DIR | GPIO41 | RS485 `DE` + `/RE` | UART RTS; HIGH gönderme, LOW alma |
+| Dijital sayaç | GPIO12 | Korunmuş dijital giriş | Dahili pull-down, LOW→HIGH sayımı |
 
 ### Programlama ve ayrılması gereken pinler
 
@@ -149,12 +152,13 @@ GPIO39–42 bu projede RS485 ve röle için kullanıldığı için harici pad-JT
 - SDA ve SCL için birer takım yaklaşık `4.7 kΩ` pull-up kullanın.
 - Pull-up dirençleri 3.3 V'a bağlanmalıdır.
 - Hazır DS3231 modüllerindeki pull-up dirençlerinin 5 V'a bağlı olup olmadığını kontrol edin.
-- DS3231 adresi `0x68`, SHT40 varsayılan adresi `0x44` olduğundan iki cihaz aynı bus üzerinde çakışmadan çalışır.
+- DS3231 adresi `0x68`tir. Sensör adresleri: TMP112 `0x48`–`0x4B` (X2SON TMP112D varyantında `0x40`–`0x43`), SHT40 `0x44`/`0x45`, HDC2022 `0x40`/`0x41`. Hiçbiri DS3231 ile çakışmaz.
+- TMP112 adresi ADD0 pininin bağlandığı yere (GND, V+, SDA, SCL), HDC2022 adresi ADDR pinine (GND veya boşta `0x40`, VDD `0x41`) göre belirlenir. SHT40 adresi ürün kodundaki AD1B/BD1B sürümüyle sabittir.
 
 ### RS485
 
 - 3.3 V ile çalışan bir RS485 transceiver kullanın.
-- GPIO40 → `DI`, GPIO39 ← `RO`, GPIO41 → `DE` ve `/RE` bağlantısı yapılır.
+- GPIO40 → `DI`, GPIO39 ← `RO`, GPIO41 → `DE` ve `/RE` bağlantısı yapılır. GPIO41, UART1'in RTS çıkışı olarak donanım RS485 modunda sürülür.
 - GPIO41'e yaklaşık `10 kΩ` pull-down eklemek, ESP32-S3 başlatılana kadar transceiver'ı alıcı modunda tutar.
 - Hat sonundaysa seçilebilir `120 Ω` terminasyon direnci ekleyin.
 - Bias dirençlerini ağ üzerinde yalnızca gerekli noktada kullanın; her cihaza zorunlu olarak eklemeyin.
@@ -164,8 +168,8 @@ GPIO39–42 bu projede RS485 ve röle için kullanıldığı için harici pad-JT
 
 - Röle bobinini GPIO42'ye doğrudan bağlamayın. MOSFET/transistör, gate/base direnci, pull-down ve flyback diyodu kullanın.
 - GPIO42'ye harici pull-down eklemek rölenin açılışta yanlışlıkla tetiklenmesini önler.
-- Buzzer akımı GPIO sınırını aşıyorsa GPIO14'ü yalnızca sürücü girişi olarak kullanın.
-- GPIO21 yalnızca 3.3 V lojik seviyeyi kabul etmelidir. Harici saha girişi için seri direnç, harici pull-down, Schmitt trigger/optoizolasyon ve ESD koruması değerlendirilmelidir.
+- Buzzer akımı GPIO sınırını aşıyorsa GPIO13'ü yalnızca sürücü girişi olarak kullanın.
+- GPIO12 yalnızca 3.3 V lojik seviyeyi kabul etmelidir. Harici saha girişi için seri direnç, harici pull-down, Schmitt trigger/optoizolasyon ve ESD koruması değerlendirilmelidir.
 
 ### ESP32-S3 besleme, USB ve anten
 
@@ -195,6 +199,7 @@ Başvuru belgeleri:
 | Başlangıç içeriği | Kırmızı saat |
 | Saat konumu | X=1, Y=3 |
 | Varsayılan font | GohuFont6x11 |
+| Sıcaklık sensörü | TMP112, `0x48`, 4 Hz, 2 saniye ölçüm aralığı; önceki sürümden yükseltilen cihazlarda SHT40 korunur |
 | AP SSID | `STEP-RGB` |
 | AP parolası | `00000000` |
 | AP adresi | `192.168.4.1` |
@@ -205,11 +210,13 @@ Başvuru belgeleri:
 | Modbus seri ayarı | 115200 baud, 8N1 |
 | RS485 yön kontrolü | Etkin |
 | Panel uyku zamanı | Devre dışı; kayıtlı varsayılan aralık 23:00–07:00 |
+| NTP eşitleme | Devre dışı; `pool.ntp.org`, saat dilimi UTC+3 (`<+03>-3`) |
+| Yerel ağ (STA) portal girişi | Kapalı; açılırsa kullanıcı `admin`, parola AP parolası |
 | Alarmlar | Boş |
 | Seri monitör | 115200 baud |
 | Watchdog | 20 saniye |
 
-Varsayılan AP parolası yalnızca ilk kurulum içindir. Cihazı devreye aldıktan sonra web arayüzünden değiştirilmelidir.
+Varsayılan AP parolası yalnızca ilk kurulum içindir ve cihaz devreye alınmadan önce web arayüzünden değiştirilmelidir; varsayılan parola kullanıldığı sürece Wi-Fi ayarlarında uyarı gösterilir.
 
 ## İlk kurulum
 
@@ -220,10 +227,10 @@ Varsayılan AP parolası yalnızca ilk kurulum içindir. Cihazı devreye aldıkt
 5. Captive portal otomatik açılmazsa `http://192.168.4.1/` adresini açın.
 6. Ayarlar sayfasından panel scan oranını, satır/sütun sayısını ve fiziksel zincirleme yönünü seçin.
 7. Kırmızı, yeşil ve mavi panel testlerini çalıştırarak renk/sinyal bağlantılarını doğrulayın.
-8. Saat/tarih, Wi-Fi STA, Modbus ve alarm ayarlarını yapılandırın.
+8. AP parolasını değiştirin; ardından saat/tarih (veya NTP), Wi-Fi STA, Modbus ve alarm ayarlarını yapılandırın.
 9. Ana editörden TextBox/ValueBox öğelerini ekleyip panele uygulayın.
 
-Panel, Wi-Fi ve haberleşme gibi donanım seviyesini etkileyen bazı ayarlar kaydedildikten sonra cihaz kontrollü olarak yeniden başlar.
+Panel tarama/yerleşim, Wi-Fi ve haberleşme gibi donanım seviyesini etkileyen ayarlar kaydedildikten sonra cihaz kontrollü olarak yeniden başlar. Yalnızca parlaklık değiştiyse ayar yeniden başlatmadan hemen uygulanır. Satır/sütun sayısı azaltıldığında mevcut tasarım yeni yerleşime sığmıyorsa kaydetme yanıtı bunu bildirir; yeniden başlatmada varsayılan tasarım yüklenir.
 
 ## Web arayüzü
 
@@ -235,9 +242,11 @@ Ana sayfa aşağıdaki işlemleri sağlar:
 - Düzenlenecek panelin seçilmesi
 - TextBox veya ValueBox eklenmesi
 - Öğenin fare veya dokunmatik ekranla sürüklenmesi
-- Font, renk, dönüş, konum ve kaydırma ayarı
+- Font, renk, dönüş, konum, gösterim alanı ve kaydırma ayarı
 - Panel başına doluluk göstergesi
 - Tasarımın flash belleğe kaydedilmesi
+
+Her kutunun **gösterim alanı** seçilebilir. “Yalnızca kendi paneli” seçildiğinde kutu kendi panelinin dışında kırpılır ve kayar yazı panelin kenarlarında döner; komşu paneldeki kutularla üst üste binmez. “Tüm ekran” seçildiğinde yazı bütün ekranda kayar. Yeni kutular kendi paneliyle başlar; 0.9.x sürümünden yükseltilen tasarımlar eski davranışı korumak için “Tüm ekran” olarak taşınır. Önizleme aynı kırpmayı gösterir.
 
 Editör önizlemesi fontları tarayıcı sistem fontlarıyla taklit etmez. Cihazdaki gerçek Adafruit GFX bitmap ve glif metrikleri `/api/font` üzerinden alınır; bu nedenle web önizlemesi ile fiziksel panel konumu aynı koordinat sistemini kullanır.
 
@@ -248,9 +257,10 @@ TextBox aşağıdaki içerik türlerini gösterebilir:
 - Sabit metin
 - Saat
 - Tarih
-- SHT40 sıcaklığı
+- Sıcaklık
+- Nem (SHT40 veya HDC2022 seçiliyken)
 
-İçerik döngüsü etkinleştirilirse seçilen türler `Yazı → Saat → Tarih → Sıcaklık` sırasıyla gösterilir. Geçiş süresi 1–3600 saniye arasında seçilebilir. Kayar yazı açıkken içerik geçişi, mevcut içeriğin tam turu tamamlandıktan sonra yapılır.
+İçerik döngüsü etkinleştirilirse seçilen türler `Yazı → Saat → Tarih → Sıcaklık → Nem` sırasıyla gösterilir. Geçiş süresi 1–3600 saniye arasında seçilebilir. Kayar yazı açıkken içerik geçişi, mevcut içeriğin tam turu tamamlandıktan sonra yapılır.
 
 Metin alanının dahili kapasitesi 48 byte'tır; sonlandırıcı nedeniyle kullanıcı metni en fazla 47 UTF-8 byte olabilir. Türkçe karakterlerin birden fazla UTF-8 byte kullanabileceği unutulmamalıdır.
 
@@ -259,9 +269,16 @@ Metin alanının dahili kapasitesi 48 byte'tır; sonlandırıcı nedeniyle kulla
 ValueBox iki kaynaktan değer alabilir:
 
 1. Modbus RTU holding register
-2. GPIO21 dijital giriş sayacı
+2. GPIO12 dijital giriş sayacı
 
 Modbus kaynağında signed 16-bit integer veya IEEE-754 float seçilebilir. Dijital giriş kaynağında yukarı/aşağı sayma ve 32-bit başlangıç değeri ayarlanabilir. Cihaz yeniden başladığında çalışma değeri kayıtlı başlangıç değerinden başlar; runtime Modbus/sayaç değeri NVS'ye sürekli yazılmaz.
+
+Tasarım kaydedildiğinde veri kaynağı (kaynak türü, register adresi/değer tipi) ve başlangıç değeri değişmeyen ValueBox'lar mevcut değerlerini korur; kutuyu taşımak, rengini veya fontunu değiştirmek ya da yeni kutu eklemek sayacı sıfırlamaz. Kaynağı veya başlangıç değeri değişen kutu başlangıç değerinden yeniden başlar.
+
+Gösterim seçenekleri:
+
+- **Ondalık basamak (0–3):** Float değer bu basamağa yuvarlanır. Integer ve sayaç değerlerinde ondalık nokta kaydırılır; örneğin register değeri `1234` ve 2 basamak `12.34` olarak gösterilir.
+- **Birim / son ek:** Değerin sonuna eklenir, örneğin `°C` veya ` bar`. En fazla 15 UTF-8 bayttır ve TextBox ile aynı karakter kümesini kullanır.
 
 ### Ayarlar sayfası
 
@@ -269,9 +286,10 @@ Ayarlar ekranı şu grupları içerir:
 
 - Panel tarama, boyut, parlaklık ve zincirleme yönü
 - RGB panel testi
-- DS3231 saat/tarih ayarı
+- DS3231 saat/tarih ayarı; alanlar cihaz saatiyle canlı ilerler
 - Telefon/bilgisayar saatini kullanma
-- Panel uyku zamanlaması
+- NTP sunucusu ve saat dilimi
+- Panel uyku zamanlaması; saat ayarından bağımsız kaydedilir
 - Alarm listesi
 - UART/Modbus haberleşme ayarları
 - Wi-Fi AP ve STA ayarları
@@ -281,6 +299,8 @@ Ayarlar ekranı şu grupları içerir:
 ### Dil desteği
 
 Web arayüzü Türkçe, İngilizce, Almanca, İspanyolca ve Arapça dillerini destekler. İlk açılışta desteklenen tarayıcı dili algılanır. Seçim tarayıcının `localStorage` alanında saklanır; farklı telefon veya bilgisayarlarda dil tercihi ayrı olabilir.
+
+Cihazın gönderdiği bütün hata ve onay mesajları da beş dilde çevrilir. `node tools/generate_portal_compressed.mjs`, `UI_TEXT(...)` ile işaretli bir firmware mesajının veya sayfadaki bir metnin çevirisi eksikse portalı üretmeyi reddeder.
 
 Arapçada sayfa RTL düzenine geçer. Panel koordinat sistemi, bağlantı şekilleri, sayısal alanlar ve piksel önizlemesi teknik doğruluğu korumak için LTR kalır.
 
@@ -296,7 +316,9 @@ Firmware toplam 59 font içerir:
 - FreeSerif ailesi; normal, bold ve italic, 9/12/18/24 pt
 - Org_01, Picopixel, Tiny3x3a2pt7b ve TomThumb
 
-Her fontun `Ç Ğ İ Ö Ş Ü ç ğ ı ö ş ü` karakterleri ve derece işareti fonta özgü bitmap olarak üretilmiştir. `℃` karakteri derece glifi ile `C` karakterinin birleşimi şeklinde gösterilir.
+Her fontun `Ç Ğ İ Ö Ş Ü ç ğ ı ö ş ü` karakterleri ve derece işareti fonta özgü bitmap olarak üretilmiştir. `℃` karakteri derece glifi ile `C` karakterinin birleşimi şeklinde gösterilir. Küçük bitmap fontlarda (Apple, Gohu, Fixed, Org_01, Picopixel, Tiny3x3, TomThumb) derece işareti fontun rakam yüksekliğine göre boyutlanan kapalı bir halka olarak çizilir ve üstü rakamların/büyük harflerin üst hizasına oturtulur; FreeFont ailelerinde fontun kendi `°` glifi kullanılır.
+
+Almanca ve İspanyolca için `Ä ä Á á É é Í í Ó ó Ú ú Ñ ñ ¡ ¿` karakterleri çalışma anında her fontun kendi temel harfinden ve çizgi kalınlığından sentezlenir (`Ö Ü ö ü` zaten Türkçe kümede vardır). `ß`, resmi yazım karşılığı olan `ss` olarak gösterilir. Desteklenmeyen karakterler `?` olarak görünür; Arapça harfler panelde gösterilemez (web arayüzü Arapça kullanılabilir).
 
 Font kataloğu [`lib/Fonts/FontCatalog.cpp`](lib/Fonts/FontCatalog.cpp), üretilmiş Türkçe glifler ise [`lib/Fonts/FontTurkishExtensions.generated.h`](lib/Fonts/FontTurkishExtensions.generated.h) içindedir.
 
@@ -326,7 +348,7 @@ python tools/generate_turkish_font_extensions.py \
 - Baudrate: `115200`
 - Veri formatı: `8N1`
 - Stop bit: sabit `1`
-- Yön kontrolü: GPIO41 ile manuel RS485 DIR
+- Yön kontrolü: GPIO41, UART donanım RS485 yarı-çift yönlü modunda RTS olarak sürülür
 
 Web arayüzünün **Haberleşme Ayarları** bölümünde Slave ID `1–247` aralığında elle girilebilir. Aynı bölümden baudrate `4800`, `9600`, `19200`, `57600` veya `115200`; data size 5–8 bit; parity None/Even/Odd olarak seçilebilir. Ayarlar NVS içinde saklanır ve kayıt sonrasında cihaz yeni iletişim ayarlarıyla yeniden başlar.
 
@@ -337,6 +359,10 @@ Web arayüzünün **Haberleşme Ayarları** bölümünde Slave ID `1–247` aral
 | Read Holding Registers | `0x03` | ValueBox register değerlerini okur |
 | Write Single Register | `0x06` | Tek register yazar |
 | Write Multiple Registers | `0x10` | Ardışık register yazar |
+
+Çerçeve sonu UART donanımının RX zaman aşımıyla algılanır (en az 3.5 karakter, yüksek baudrate'lerde en az 2 ms sessizlik). Böylece ana döngü web isteği işlerken bile ardışık çerçeveler birbirine karışmaz. Alınan çerçeveler kuyruğa alınır ve ana döngüde işlenir; kuyrukta 250 ms'den uzun bekleyen istekler, bir sonraki bus döngüsüyle çakışabilecek geç cevap yerine atılır. Cevap gönderimi ana döngüyü bloklamaz; DIR hattını UART donanımı son stop bitinden sonra bırakır.
+
+Donanım yön kontrolü beklendiği gibi çalışmazsa `include/AppConfig.h` içindeki `Modbus::hardwareDirectionControl` değeri `false` yapılarak 0.9.x sürümündeki yazılımsal DIR kontrolüne dönülebilir.
 
 Bir okumada/yazmada en fazla 64 register işlenir. Standart Modbus exception kodları kullanılır:
 
@@ -366,28 +392,53 @@ Modbus ile gelen değer yalnızca çalışma belleğinde tutulur. Yeniden başla
 
 ## Dijital giriş sayacı
 
-GPIO21 dahili pull-down ile LOW seviyesinde bekler. Debounce süresi 30 ms'dir. Kararlı bir `LOW → HIGH` kenarı geldiğinde dijital giriş kaynağını kullanan ValueBox öğeleri yön ayarına göre bir artırılır veya azaltılır.
+GPIO12 dahili pull-down ile LOW seviyesinde bekler. Giriş, ana döngüden bağımsız bir `esp_timer` geri çağrısıyla her 1 ms'de örneklenir; web sayfası sunulurken veya flash yazılırken gelen darbeler kaçmaz. Debounce süresi 30 ms'dir; bir darbenin sayılması için girişin en az 30 ms LOW ve ardından 30 ms HIGH kalması gerekir (en fazla yaklaşık 16 darbe/saniye). Kararlı bir `LOW → HIGH` kenarı geldiğinde dijital giriş kaynağını kullanan ValueBox öğeleri yön ayarına göre bir artırılır veya azaltılır.
 
 - Sayaç türü: signed 32-bit
 - Aralık: `-2147483648` … `2147483647`
 - Taşma yerine sınırda durur
 - Negatif değerler panelde gösterilebilir
 - Birden fazla dijital ValueBox aynı fiziksel kenarı birlikte işler
+- Tasarım kaydedildiğinde başlangıç değeri değişmeyen sayaçlar değerini korur
 
 ## Saat, sıcaklık, alarm ve panel uyku işlevi
 
 ### DS3231
 
-DS3231 her 100 ms'de bir okunur. RTC bulunamazsa saat, alarm ve zamanlamaya bağlı işlevler hazır duruma geçmez. RTC güç kaybı algılanırsa ilk açılışta firmware derleme tarih/saatine ayarlanır; daha sonra web arayüzünden doğru zaman girilmelidir.
+DS3231 her 100 ms'de bir okunur. RTC bulunamazsa saat, alarm ve zamanlamaya bağlı işlevler hazır duruma geçmez. RTC güç kaybı algılanırsa ilk açılışta firmware derleme tarih/saatine ayarlanır; daha sonra web arayüzünden doğru zaman girilmeli veya NTP açılmalıdır.
 
-### SHT40
+Ayarlar sayfasındaki tarih/saat alanları cihaz saatiyle birlikte canlı ilerler; elle girilen değer de kaydedilene kadar saymaya devam eder. Böylece sayfa uzun süre açık kaldıktan sonra kaydetmek RTC'yi geri almaz.
 
-SHT40 yaklaşık 2 saniyede bir yüksek hassasiyetli ölçüm başlatır. Sensör bulunamaz veya haberleşme kesilirse yeniden algılama denenir ve sıcaklık içeriğinde `TMP?` gösterilir.
+### NTP
 
-Sıcaklık iki biçimde gösterilebilir:
+NTP açıksa cihaz STA ağına her bağlandığında SNTP istemcisini başlatır ve gelen zamanı seçilen POSIX saat dilimine (yaz saati kurallarıyla) çevirip DS3231'e yazar. SNTP eşitlemesi saatte bir yenilenir; RTC en fazla dakikada bir yazılır. Ayarlar sayfasında hazır saat dilimleri ve özel POSIX TZ değeri seçilebilir. NTP açıkken elle girilen saat bir sonraki eşitlemede düzeltilir.
 
-- Bir ondalıklı float, örneğin `23.5°C`
-- En yakın tam sayıya yuvarlanmış integer, örneğin `24°C`
+### Sıcaklık ve nem sensörü
+
+Karta üç sensörden biri takılabilir; model **Ayarlar → Sıcaklık Sensörü** bölümünden seçilir ve kaydedildiğinde yeniden başlatmadan uygulanır. Yeni cihazlarda ve fabrika ayarında TMP112 seçilidir; daha önce SHT40 ile kurulmuş cihazlar güncellemeden sonra SHT40 ile çalışmaya devam eder. Sürücüler TI ve Sensirion datasheet'lerine göre yazılmıştır: [`lib/TMP112`](lib/TMP112/src/TMP112.cpp), [`lib/SHT40`](lib/SHT40/src/SHT40.cpp), [`lib/HDC2022`](lib/HDC2022/src/HDC2022.cpp).
+
+| Sensör | Ölçüm | I²C adresi | Sensöre özgü ayarlar | Algılama |
+|---|---|---|---|---|
+| TMP112 | Sıcaklık, 0.0625 °C çözünürlük | `0x48`–`0x4B`, X2SON TMP112D: `0x40`–`0x43` | Dönüşüm hızı 0.25/1/4/8 Hz, genişletilmiş aralık (13 bit, 150 °C'ye kadar) | Yapılandırma registerının salt okunur R1:R0 bitleri |
+| SHT40 | Sıcaklık ve nem | `0x44` (AD1B), `0x45` (BD1B) | Ölçüm hassasiyeti yüksek/orta/düşük (en fazla 8.2/4.5/1.7 ms) | CRC korumalı seri numara okuması |
+| HDC2022 | Sıcaklık ve nem | `0x40` (ADDR → GND/boşta), `0x41` (ADDR → VDD) | Sıcaklık ve nem çözünürlüğü 14/11/9 bit | Üretici kimliği `0x5449`, cihaz kimliği `0x07D0` |
+
+Tüm sensörler için ortak ayarlar:
+
+- Ölçüm aralığı: 1–60 saniye (varsayılan 2 saniye)
+- Sıcaklık düzeltmesi: −10.0…+10.0 °C
+- Nem düzeltmesi: −20.0…+20.0 %RH (yalnızca nem ölçen sensörlerde)
+
+SHT40 ve HDC2022 her aralıkta tek seferlik ölçüm başlatır; TMP112 seçilen hızda sürekli ölçer ve son sonuç okunur. Tek bir I²C hatasında son değer korunur; art arda üç hatada sensör kayıp sayılır ve 10 saniyede bir yeniden aranır.
+
+Seçili sensör bulunamazsa sıcaklık ve nem içeriğinde sensöre göre `TMP?`, `SHT?` veya `HDC?` gösterilir. Ayarlar sayfası sensörün bulunup bulunmadığını, adresini ve anlık ölçümü gösterir.
+
+Sıcaklık ve nem iki biçimde gösterilebilir:
+
+- Bir ondalıklı, örneğin `23.5°C` ve `45.3%`
+- En yakın tam sayıya yuvarlanmış, örneğin `24°C` ve `45%`
+
+**TMP112 ve nem:** TMP112 nem ölçmez. Bu sensör seçiliyken editörde “Nem” veri türü ve döngüdeki “Nem” seçeneği kapalıdır; nem gösteren bir tasarım kaydedilemez ve tasarımda nem kutusu varken sensör TMP112'ye alınamaz. Bu kontroller herhangi bir şekilde aşılırsa panel nem yerine `--%` gösterir.
 
 ### Alarm
 
@@ -400,7 +451,7 @@ Sıcaklık iki biçimde gösterilebilir:
 
 ### Panel uyku zamanlaması
 
-Uyku işlevi ESP32-S3'ü kapatmaz; yalnızca panel parlaklığını sıfıra indirir. Wi-Fi, web portalı, Modbus, sensörler ve alarmlar çalışmaya devam eder.
+Uyku ayarları saat ayarından ayrı bir formla kaydedilir; RTC takılı olmasa bile kaydedilebilir. Uyku işlevi ESP32-S3'ü kapatmaz; yalnızca panel parlaklığını sıfıra indirir. Wi-Fi, web portalı, Modbus, sensörler ve alarmlar çalışmaya devam eder.
 
 Uyku başlangıcı her gün uygulanır. Açılma zamanı “her gün” veya “yalnızca hafta içi” seçimine uyar. Örneğin cuma 23:00'te kararan panel, hafta içi seçiliyse pazartesi 07:00'de yeniden açılabilir.
 
@@ -421,7 +472,13 @@ Cihaz sürekli `WIFI_AP_STA` modunda çalışır:
 
 ESP32-S3 yalnızca 2.4 GHz Wi-Fi destekler. STA ağı 5 GHz-only olmamalıdır.
 
-Web arayüzü HTTP kullanır ve ayrıca kullanıcı hesabı/oturum doğrulaması içermez. STA ile kurumsal veya ev ağına bağlandığında cihaz portalına aynı ağdaki istemciler erişebilir. Cihaz güvenilmeyen bir ağa doğrudan bağlanmamalı ve varsayılan AP parolası değiştirilmelidir.
+### Portal erişimi ve güvenlik
+
+- Yerel AP'ye bağlanan istemciler AP parolasını zaten bildiği için portala doğrudan erişir.
+- Wi-Fi ayarlarındaki **“Bu ağdan erişimde kullanıcı adı ve parola iste”** seçeneği varsayılan olarak kapalıdır; bu durumda STA ağındaki tarayıcılar portala girişsiz erişir ve aynı ağdaki herkes ayarları değiştirebilir, firmware yükleyebilir.
+- Seçenek açıldığında STA ağı üzerinden gelen her istek, OTA yüklemesi dahil, HTTP Digest kimlik doğrulaması ister: kullanıcı adı `admin`, parola cihazın AP parolasıdır. Firmware yüklemesinde kimlik ilk bayt flash'a yazılmadan önce kontrol edilir. Portal HTTPS kullanmadığı için Chrome bu girişte “bağlantınız gizli değil” uyarısı gösterir; bu, bağlantının şifrelenmediğini belirtir.
+- Kayıtlı AP ve STA parolaları `/api/settings` yanıtında gönderilmez; yalnızca STA parolasının kayıtlı olup olmadığı ve varsayılan AP parolasının kullanılıp kullanılmadığı bildirilir. Parola alanı boş bırakılırsa kayıtlı parola korunur; STA SSID değiştirilip parola boş bırakılırsa açık ağ kabul edilir.
+- Portal HTTP kullanır (TLS yoktur). Digest parolayı açık metin göndermez, ancak trafiğin geri kalanı şifrelenmez. Cihaz güvenilmeyen bir ağa doğrudan bağlanmamalıdır.
 
 ## OTA firmware güncellemesi
 
@@ -432,19 +489,19 @@ Web arayüzü HTTP kullanır ve ayrıca kullanıcı hesabı/oturum doğrulaması
 5. Dosyayı seçip güncellemeyi başlatın.
 6. Doğrulama tamamlandığında cihaz otomatik yeniden başlar.
 
-OTA sırasında cihazın ve panelin beslemesini kesmeyin. Firmware güncelleme servisi uzun flash işlemleri sırasında watchdog'u besler.
+STA girişi açıksa yerel ağdan yapılan güncelleme portal girişini gerektirir. OTA sırasında cihazın ve panelin beslemesini kesmeyin. Firmware güncelleme servisi uzun flash işlemleri sırasında watchdog'u besler.
 
 ## Kalıcı ayarlar ve güvenli açılış
 
-Panel, ağ, UART, uyku, alarm ve içerik ayarları ESP32 Preferences/NVS içinde `step-rgb` namespace'i altında tutulur.
+Panel, ağ, UART, uyku, NTP, alarm ve içerik ayarları ESP32 Preferences/NVS içinde `step-rgb` namespace'i altında tutulur.
 
-İçerik ayarları şema sürümü 6'dır. Eski içerik şemaları 1–5 arasında algılanıp yeni yapıya taşınır. Alarm şeması sürüm 2'dir ve eski tekrar ayarları gün maskesine yükseltilir. Geçersiz veya eksik NVS verileri güvenli varsayılanlarla onarılır.
+İçerik ayarları şema sürümü 7'dir. Eski içerik şemaları 1–6 arasında algılanıp yeni yapıya taşınır; taşınan kutular “Tüm ekran” gösterim alanını, float ValueBox'lar 1 ondalık basamağı korur. Kayıtlı blok yükleme ve taşıma sırasında ana döngü yığınına değil heap'e alınır. Alarm şeması sürüm 2'dir ve eski tekrar ayarları gün maskesine yükseltilir. Geçersiz veya eksik NVS verileri güvenli varsayılanlarla onarılır.
 
-Boot guard her açılışı sayar. Cihaz 60 saniye kararlı çalışınca sayaç temizlenir. Beşten fazla art arda kararsız açılış algılanırsa ayarlar fabrika varsayılanlarına döndürülür. Web arayüzünün planladığı normal yeniden başlatmalarda sayaç önceden temizlenir.
+Boot guard yalnızca anormal biten açılışları sayar: önceki çalışma panik, watchdog veya brownout ile bittiyse sayaç artar. Güç kesip açmak, reset butonu veya yazılımsal yeniden başlatma zinciri sıfırlar; böylece cihazı kısa aralıklarla açıp kapatmak fabrika ayarına dönüşü tetiklemez. Cihaz 60 saniye kararlı çalışınca sayaç temizlenir. Beşten fazla art arda anormal reset algılanırsa ayarlar fabrika varsayılanlarına döndürülür.
 
 ## HTTP uç noktaları
 
-Bu uç noktalar web arayüzünün dahili API'sidir; sürümler arasında değişebilir.
+Bu uç noktalar web arayüzünün dahili API'sidir; sürümler arasında değişebilir. STA girişi açıksa STA ağından gelen isteklerin tamamı Digest kimlik doğrulaması gerektirir.
 
 | Metot | Yol | Açıklama |
 |---|---|---|
@@ -452,14 +509,17 @@ Bu uç noktalar web arayüzünün dahili API'sidir; sürümler arasında değiş
 | GET | `/settings` | Ayarlar sayfası |
 | GET | `/i18n.js` | Sıkıştırılmış dil paketi |
 | GET | `/firmware.js` | Firmware sürümünü sayfaya işler |
-| GET | `/api/settings` | Tüm ayarları JSON döndürür |
+| GET | `/api/settings` | Tüm ayarları JSON döndürür; parolalar hariç |
 | GET | `/api/wifi/status` | STA durum/IP/RSSI bilgisini döndürür |
 | GET | `/api/content` | Panel içerik modelini döndürür |
 | POST | `/api/content` | İçerik tasarımını doğrular ve kaydeder |
 | GET | `/api/font?id=N` | Font bitmap ve glif metriklerini döndürür |
-| GET | `/api/temperature` | Sıcaklık durumunu döndürür |
-| POST | `/api/settings/panel` | Panel ayarlarını kaydeder |
-| POST | `/api/settings/clock` | Saat/tarih ve uyku ayarlarını kaydeder |
+| GET | `/api/temperature` | Seçili sensörü, bulunma durumunu, sıcaklık ve nemi döndürür |
+| POST | `/api/settings/panel` | Panel ayarlarını kaydeder; yalnızca parlaklık değiştiyse yeniden başlatmaz |
+| POST | `/api/settings/clock` | DS3231 saat/tarihini ayarlar |
+| POST | `/api/settings/sleep` | Panel uyku ayarlarını kaydeder |
+| POST | `/api/settings/time-sync` | NTP sunucusu, saat dilimi ve açık/kapalı durumunu kaydeder |
+| POST | `/api/settings/temperature-sensor` | Sensör modelini ve sensöre özgü ayarları kaydedip uygular |
 | POST | `/api/settings/alarms` | Alarm listesini kaydeder |
 | POST | `/api/settings/communication` | Slave ID ve UART/RS485 ayarlarını kaydeder |
 | POST | `/api/settings/wifi` | AP/STA ayarlarını kaydeder |
@@ -482,7 +542,7 @@ Bağımlılıklar [`platformio.ini`](platformio.ini) tarafından otomatik indiri
 - FastLED `^3.10.3`
 - Adafruit GFX Library `^1.12.6`
 - RTClib `^2.1.4`
-- Proje içi SHT40 sürücüsü
+- Proje içi SHT40, TMP112 ve HDC2022 sürücüleri
 
 ### PlatformIO komutları
 
@@ -540,10 +600,11 @@ Betik:
 1. `homeHtml` ve `settingsHtml` içeriklerini yeniden kurar.
 2. Firmware sürümünü HTML'e yerleştirir.
 3. Inline JavaScript ve çeviri betiği sözdizimini doğrular.
-4. HTML/JavaScript dosyalarını gzip ile sıkıştırır.
-5. [`include/PortalCompressed.h`](include/PortalCompressed.h) dosyasını üretir.
+4. Çeviri tablosunu denetler: her satırda beş dil olmalı, anahtarlar tekrar etmemeli; `UI_TEXT(...)` ile işaretli her firmware mesajının ve sayfadaki her görünür metnin çevirisi bulunmalıdır.
+5. HTML/JavaScript dosyalarını gzip ile sıkıştırır.
+6. [`include/PortalCompressed.h`](include/PortalCompressed.h) dosyasını üretir.
 
-`PortalPage.h`, `portal-i18n.js` veya firmware sürümü değiştirildiğinde bu komut yeniden çalıştırılmalıdır. `PortalCompressed.h` elle düzenlenmemelidir.
+`PortalPage.h`, `portal-i18n.js`, firmware sürümü veya portala gönderilen bir firmware mesajı değiştirildiğinde bu komut yeniden çalıştırılmalıdır. Portala gönderilen yeni mesajlar `UI_TEXT("...")` ile işaretlenmeli ve [`web/portal-i18n.js`](web/portal-i18n.js) tablosuna eklenmelidir. `PortalCompressed.h` elle düzenlenmemelidir.
 
 ## Proje dizin yapısı
 
@@ -554,10 +615,13 @@ ESP32_S3_LedMatrix_Controller/
 │   ├── ContentModel.h              # TextBox/ValueBox veri modeli
 │   ├── PortalPage.h                # Web arayüzü HTML/CSS/JavaScript
 │   ├── PortalCompressed.h          # Üretilmiş gzip web varlıkları
+│   ├── UiText.h                    # Çevrilecek portal mesajı işaretçisi
 │   └── ...                         # Servis ve uygulama başlıkları
 ├── lib/
 │   ├── Fonts/                      # Font kataloğu ve Türkçe glifler
-│   └── SHT40/                      # Proje içi SHT40 sürücüsü
+│   ├── HDC2022/                    # HDC2022 sıcaklık/nem sürücüsü
+│   ├── SHT40/                      # SHT40 sıcaklık/nem sürücüsü
+│   └── TMP112/                     # TMP112 sıcaklık sürücüsü
 ├── src/
 │   ├── main.cpp                    # Servis oluşturma ve ana döngü
 │   ├── PanelDisplay.cpp            # HUB75 DMA ve panel eşleme
@@ -565,6 +629,7 @@ ESP32_S3_LedMatrix_Controller/
 │   ├── PortalApplication.cpp       # HTTP portalı ve API'ler
 │   ├── ModbusRtuSlaveService.cpp   # Modbus RTU slave
 │   ├── SettingsService.cpp         # NVS, doğrulama ve migration
+│   ├── TimeSyncApplication.cpp     # NTP → DS3231 eşitleme
 │   └── ...
 ├── tools/
 │   ├── generate_portal_compressed.mjs
@@ -606,6 +671,7 @@ ESP32_S3_LedMatrix_Controller/
 - Mobil veriyi geçici olarak kapatın veya cihazın internetsiz Wi-Fi ağında kalmasına izin verin.
 - AP durum LED'ini ve 115200 baud seri logları kontrol edin.
 - STA denemeleri aktif AP istemcisi varken otomatik olarak bekletilir; bu normaldir.
+- Yerel ağdan (STA IP adresi) açarken tarayıcı giriş isterse STA girişi açıktır: kullanıcı adı `admin`, parola AP parolasıdır. Girişi istemiyorsanız cihazın AP ağına bağlanıp Wi-Fi ayarlarından seçeneği kapatın.
 
 ### STA ağına bağlanmıyor
 
@@ -620,15 +686,18 @@ ESP32_S3_LedMatrix_Controller/
 - Baudrate, data bit ve parity değerlerini eşleştirin; stop bit daima 1'dir.
 - A/B polaritesini ve ortak GND'yi kontrol edin.
 - GPIO41'in transceiver `DE` ve `/RE` pinlerine bağlı olduğunu kontrol edin.
+- Seri logda `DIR=UART` görünmeli. Donanım yön kontrolü transceiver ile uyumsuzsa `Modbus::hardwareDirectionControl = false` ile yazılımsal DIR kontrolünü deneyin.
+- Seri logdaki `late Modbus request(s) dropped` uyarısı, ana döngünün 250 ms'den uzun meşgul kaldığını gösterir.
 - Master'ın yalnızca web arayüzünde ValueBox'a atanmış register adreslerini kullandığını doğrulayın.
 - Float değerlerde iki ardışık register ve high-word-first sırasını kullanın.
 
 ### Saat veya sıcaklık görünmüyor
 
 - I²C pull-up dirençlerinin 3.3 V'a bağlı olduğunu kontrol edin.
-- DS3231 için `0x68`, SHT40 için `0x44` adresini tarayın.
+- DS3231 için `0x68` adresini, sensör için Ayarlar → Sıcaklık Sensörü bölümünde seçili adresi tarayın.
+- Panelde `TMP?`, `SHT?` veya `HDC?` görünüyorsa seçili model veya adres karttaki sensörle uyuşmuyordur; ayarlar sayfasındaki sensör durumunu kontrol edin.
 - Hazır sensör modüllerinin 5 V pull-up içermediğini doğrulayın.
-- Seri loglarda `DS3231 not found` veya `SHT40 not found` mesajını kontrol edin.
+- Seri loglarda `DS3231 not found` veya `TMP112/SHT40/HDC2022 not found at 0x..` mesajını kontrol edin.
 
 ### Cihaz sürekli yeniden başlıyor
 
@@ -636,7 +705,7 @@ ESP32_S3_LedMatrix_Controller/
 - Panel akımının ESP32-S3 regülatöründen geçmediğini doğrulayın.
 - EN/CHIP_PU RC devresini ve strapping pin seviyelerini kontrol edin.
 - Seri monitörde reset nedenini inceleyin.
-- Boot guard, tekrarlayan başarısız açılışlardan sonra güvenli varsayılanları otomatik yükleyebilir.
+- Boot guard, art arda çöken veya brownout ile biten açılışlardan sonra güvenli varsayılanları otomatik yükleyebilir.
 
 ## Bilinen sınırlar
 
@@ -646,7 +715,10 @@ ESP32_S3_LedMatrix_Controller/
 - Toplam içerik kapasitesi en fazla 32 kutudur.
 - TextBox metni en fazla 47 UTF-8 byte olabilir.
 - Runtime Modbus/sayaç değerleri yeniden başlatmalar arasında saklanmaz.
-- Portal HTTP üzerinden çalışır ve kullanıcı bazlı kimlik doğrulama içermez.
+- Portal HTTP üzerinden çalışır (TLS yok). STA girişi isteğe bağlıdır; açıldığında tek bir yönetici girişi vardır ve parolası AP parolasıdır.
+- Panelde yalnızca ASCII, Türkçe, Almanca ve İspanyolca harfler ile `°` gösterilebilir; Arapça metin panelde gösterilemez.
+- Dijital sayaç debounce nedeniyle saniyede en fazla yaklaşık 16 darbe sayar.
+- Donanım RS485 yön kontrolü ve yeni Modbus çerçeve ayırma, gerçek bus üzerinde doğrulanmalıdır.
 
 ## Lisans ve üçüncü taraf bileşenler
 

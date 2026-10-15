@@ -152,21 +152,62 @@ struct TurkishExtensionFont {
 
 #include "FontTurkishExtensions.generated.h"
 
+static_assert(
+  FontCatalog::lastGlyphCode == Apple6x10LastExtendedGlyph,
+  "FontCatalog::lastGlyphCode must cover every encoded glyph");
+
 enum class GlyphDecoration : uint8_t {
   cedilla,
   breve,
   dot,
   diaeresis,
   dotless,
-  degree
+  degree,
+  acute,
+  tilde,
+  inverted
 };
 
 bool syntheticGlyphSpec(
   uint8_t character,
   uint8_t &baseCharacter,
-  GlyphDecoration &decoration)
+  GlyphDecoration &decoration,
+  bool &removeDot)
 {
+  removeDot = false;
   switch (character) {
+    case Apple6x10Adieresis:
+      baseCharacter = 'A'; decoration = GlyphDecoration::diaeresis; return true;
+    case Apple6x10SmallAdieresis:
+      baseCharacter = 'a'; decoration = GlyphDecoration::diaeresis; return true;
+    case Apple6x10Aacute:
+      baseCharacter = 'A'; decoration = GlyphDecoration::acute; return true;
+    case Apple6x10SmallAacute:
+      baseCharacter = 'a'; decoration = GlyphDecoration::acute; return true;
+    case Apple6x10Eacute:
+      baseCharacter = 'E'; decoration = GlyphDecoration::acute; return true;
+    case Apple6x10SmallEacute:
+      baseCharacter = 'e'; decoration = GlyphDecoration::acute; return true;
+    case Apple6x10Iacute:
+      baseCharacter = 'I'; decoration = GlyphDecoration::acute; return true;
+    case Apple6x10SmallIacute:
+      baseCharacter = 'i'; decoration = GlyphDecoration::acute; removeDot = true; return true;
+    case Apple6x10Oacute:
+      baseCharacter = 'O'; decoration = GlyphDecoration::acute; return true;
+    case Apple6x10SmallOacute:
+      baseCharacter = 'o'; decoration = GlyphDecoration::acute; return true;
+    case Apple6x10Uacute:
+      baseCharacter = 'U'; decoration = GlyphDecoration::acute; return true;
+    case Apple6x10SmallUacute:
+      baseCharacter = 'u'; decoration = GlyphDecoration::acute; return true;
+    case Apple6x10Ntilde:
+      baseCharacter = 'N'; decoration = GlyphDecoration::tilde; return true;
+    case Apple6x10SmallNtilde:
+      baseCharacter = 'n'; decoration = GlyphDecoration::tilde; return true;
+    case Apple6x10InvertedExclamation:
+      baseCharacter = '!'; decoration = GlyphDecoration::inverted; return true;
+    case Apple6x10InvertedQuestion:
+      baseCharacter = '?'; decoration = GlyphDecoration::inverted; return true;
     case Apple6x10TurkishCcedilla:
       baseCharacter = 'C'; decoration = GlyphDecoration::cedilla; return true;
     case Apple6x10TurkishGbreve:
@@ -184,7 +225,7 @@ bool syntheticGlyphSpec(
     case Apple6x10TurkishSmallGbreve:
       baseCharacter = 'g'; decoration = GlyphDecoration::breve; return true;
     case Apple6x10TurkishDotlessI:
-      baseCharacter = 'i'; decoration = GlyphDecoration::dotless; return true;
+      baseCharacter = 'i'; decoration = GlyphDecoration::dotless; removeDot = true; return true;
     case Apple6x10TurkishSmallOdieresis:
       baseCharacter = 'o'; decoration = GlyphDecoration::diaeresis; return true;
     case Apple6x10TurkishSmallScedilla:
@@ -319,7 +360,8 @@ bool synthesizeGlyph(
 {
   uint8_t baseCharacter = 0;
   GlyphDecoration decoration = GlyphDecoration::dot;
-  if (!syntheticGlyphSpec(character, baseCharacter, decoration)
+  bool removeDot = false;
+  if (!syntheticGlyphSpec(character, baseCharacter, decoration, removeDot)
       || generatedBitmap == nullptr) {
     return false;
   }
@@ -337,8 +379,60 @@ bool synthesizeGlyph(
   const uint8_t stroke = base.height >= 32 ? 3 : (base.height >= 16 ? 2 : 1);
   const uint8_t gap = 1;
 
+  if (decoration == GlyphDecoration::inverted) {
+    // Spanish inverted punctuation: the base glyph rotated by 180 degrees in
+    // its own bounding box.
+    result.width = base.width;
+    result.height = base.height;
+    result.xAdvance = base.xAdvance;
+    result.xOffset = base.xOffset;
+    result.yOffset = base.yOffset;
+    result.bitmapSize =
+      (static_cast<size_t>(base.width) * base.height + 7U) / 8U;
+    if (result.bitmapSize > generatedBitmapCapacity) {
+      return false;
+    }
+    std::memset(generatedBitmap, 0, result.bitmapSize);
+    for (uint8_t y = 0; y < base.height; ++y) {
+      for (uint8_t x = 0; x < base.width; ++x) {
+        if (bitmapPixel(base, x, y)) {
+          setBitmapPixel(generatedBitmap, base.width, base.height,
+            base.width - 1 - x, base.height - 1 - y);
+        }
+      }
+    }
+    result.bitmap = generatedBitmap;
+    result.bitmapInProgramMemory = false;
+    return true;
+  }
+
+  // Rows of the base glyph that belong to the dot of 'i' are dropped for the
+  // dotless i and for i-acute, whose accent replaces the dot. Accents are
+  // placed relative to the first remaining row, not the removed dot.
+  int16_t dotlessSeparator = -1;
+  uint8_t firstContentRow = 0;
+  if (removeDot) {
+    bool topPixelsSeen = false;
+    for (uint8_t row = 0; row + 1U < base.height; ++row) {
+      if (rowHasPixel(base, row)) {
+        topPixelsSeen = true;
+      } else if (topPixelsSeen && hasPixelAfterRow(base, row)) {
+        dotlessSeparator = row;
+        break;
+      }
+    }
+    if (dotlessSeparator < 0 && base.height >= 3) {
+      dotlessSeparator = stroke - 1U;
+    }
+    firstContentRow = static_cast<uint8_t>(dotlessSeparator + 1);
+    while (firstContentRow + 1U < base.height && !rowHasPixel(base, firstContentRow)) {
+      ++firstContentRow;
+    }
+  }
+  const int16_t contentTop = baseTop + firstContentRow;
+
   int16_t decorationLeft = baseLeft;
-  int16_t decorationTop = baseTop;
+  int16_t decorationTop = contentTop;
   int16_t decorationRight = baseRight;
   int16_t decorationBottom = baseBottom;
   uint8_t decorationWidth = 0;
@@ -349,7 +443,7 @@ bool synthesizeGlyph(
     decorationHeight = stroke;
     decorationLeft = centerX - static_cast<int16_t>(decorationWidth - 1U) / 2;
     decorationRight = decorationLeft + decorationWidth - 1;
-    decorationBottom = baseTop - gap - 1;
+    decorationBottom = contentTop - gap - 1;
     decorationTop = decorationBottom - decorationHeight + 1;
   } else if (decoration == GlyphDecoration::diaeresis) {
     decorationWidth = stroke;
@@ -359,7 +453,7 @@ bool synthesizeGlyph(
     const int16_t rightCenter = centerX + separation / 2;
     decorationLeft = leftCenter - static_cast<int16_t>(decorationWidth - 1U) / 2;
     decorationRight = rightCenter + decorationWidth / 2;
-    decorationBottom = baseTop - gap - 1;
+    decorationBottom = contentTop - gap - 1;
     decorationTop = decorationBottom - decorationHeight + 1;
   } else if (decoration == GlyphDecoration::breve) {
     decorationWidth = base.width < 3 ? 3 : static_cast<uint8_t>(
@@ -370,7 +464,24 @@ bool synthesizeGlyph(
     decorationHeight = stroke * 2U;
     decorationLeft = centerX - static_cast<int16_t>(decorationWidth - 1U) / 2;
     decorationRight = decorationLeft + decorationWidth - 1;
-    decorationBottom = baseTop - gap - 1;
+    decorationBottom = contentTop - gap - 1;
+    decorationTop = decorationBottom - decorationHeight + 1;
+  } else if (decoration == GlyphDecoration::acute) {
+    // A diagonal stroke rising to the right.
+    decorationHeight = stroke * 2U;
+    decorationWidth = decorationHeight + stroke - 1U;
+    decorationLeft = centerX - static_cast<int16_t>(decorationWidth - 1U) / 2;
+    decorationRight = decorationLeft + decorationWidth - 1;
+    decorationBottom = contentTop - gap - 1;
+    decorationTop = decorationBottom - decorationHeight + 1;
+  } else if (decoration == GlyphDecoration::tilde) {
+    const uint8_t scaledWidth = static_cast<uint8_t>(
+      (static_cast<uint16_t>(base.width) * 2U + 2U) / 3U);
+    decorationWidth = scaledWidth < 4 ? 4 : scaledWidth;
+    decorationHeight = stroke * 2U;
+    decorationLeft = centerX - static_cast<int16_t>(decorationWidth - 1U) / 2;
+    decorationRight = decorationLeft + decorationWidth - 1;
+    decorationBottom = contentTop - gap - 1;
     decorationTop = decorationBottom - decorationHeight + 1;
   } else if (decoration == GlyphDecoration::cedilla) {
     decorationWidth = stroke * 3U + 1U;
@@ -417,8 +528,8 @@ bool synthesizeGlyph(
   const bool hasDecoration = decoration != GlyphDecoration::dotless;
   const int16_t glyphLeft = hasDecoration && decorationLeft < baseLeft
     ? decorationLeft : baseLeft;
-  const int16_t glyphTop = hasDecoration && decorationTop < baseTop
-    ? decorationTop : baseTop;
+  const int16_t glyphTop = hasDecoration && decorationTop < contentTop
+    ? decorationTop : contentTop;
   const int16_t glyphRight = hasDecoration && decorationRight > baseRight
     ? decorationRight : baseRight;
   const int16_t glyphBottom = hasDecoration && decorationBottom > baseBottom
@@ -444,22 +555,6 @@ bool synthesizeGlyph(
   }
   std::memset(generatedBitmap, 0, result.bitmapSize);
 
-  int16_t dotlessSeparator = -1;
-  if (decoration == GlyphDecoration::dotless) {
-    bool topPixelsSeen = false;
-    for (uint8_t row = 0; row + 1U < base.height; ++row) {
-      if (rowHasPixel(base, row)) {
-        topPixelsSeen = true;
-      } else if (topPixelsSeen && hasPixelAfterRow(base, row)) {
-        dotlessSeparator = row;
-        break;
-      }
-    }
-    if (dotlessSeparator < 0 && base.height >= 3) {
-      dotlessSeparator = stroke - 1U;
-    }
-  }
-
   for (uint8_t y = 0; y < base.height; ++y) {
     if (dotlessSeparator >= 0 && y <= dotlessSeparator) {
       continue;
@@ -476,25 +571,24 @@ bool synthesizeGlyph(
     }
   }
 
+  const auto setDecorationPixel = [&](int16_t x, int16_t y) {
+    setBitmapPixel(generatedBitmap, result.width, result.height,
+      decorationLeft + x - glyphLeft, decorationTop + y - glyphTop);
+  };
+
   if (decoration == GlyphDecoration::dot) {
     for (uint8_t y = 0; y < decorationHeight; ++y) {
       for (uint8_t x = 0; x < decorationWidth; ++x) {
-        setBitmapPixel(
-          generatedBitmap,
-          result.width,
-          result.height,
-          decorationLeft + x - glyphLeft,
-          decorationTop + y - glyphTop);
+        setDecorationPixel(x, y);
       }
     }
   } else if (decoration == GlyphDecoration::diaeresis) {
-    const int16_t rightDotLeft = decorationRight - decorationWidth + 1;
+    const int16_t rightDotOffset = decorationRight - decorationWidth + 1
+      - decorationLeft;
     for (uint8_t y = 0; y < decorationHeight; ++y) {
       for (uint8_t x = 0; x < decorationWidth; ++x) {
-        setBitmapPixel(generatedBitmap, result.width, result.height,
-          decorationLeft + x - glyphLeft, decorationTop + y - glyphTop);
-        setBitmapPixel(generatedBitmap, result.width, result.height,
-          rightDotLeft + x - glyphLeft, decorationTop + y - glyphTop);
+        setDecorationPixel(x, y);
+        setDecorationPixel(rightDotOffset + x, y);
       }
     }
   } else if (decoration == GlyphDecoration::breve) {
@@ -505,9 +599,26 @@ bool synthesizeGlyph(
         const bool bottom = y >= decorationHeight - stroke
           && x >= stroke && x < decorationWidth - stroke;
         if (side || bottom) {
-          setBitmapPixel(generatedBitmap, result.width, result.height,
-            decorationLeft + x - glyphLeft, decorationTop + y - glyphTop);
+          setDecorationPixel(x, y);
         }
+      }
+    }
+  } else if (decoration == GlyphDecoration::acute) {
+    for (uint8_t y = 0; y < decorationHeight; ++y) {
+      const uint8_t start = static_cast<uint8_t>(
+        (decorationHeight - 1U - y) * (decorationWidth - stroke)
+        / (decorationHeight - 1U));
+      for (uint8_t x = start; x < start + stroke; ++x) {
+        setDecorationPixel(x, y);
+      }
+    }
+  } else if (decoration == GlyphDecoration::tilde) {
+    // Low-high-low-high wave over four equal segments.
+    for (uint8_t x = 0; x < decorationWidth; ++x) {
+      const uint8_t segment = static_cast<uint8_t>(x * 4U / decorationWidth);
+      const uint8_t firstRow = (segment & 1U) != 0 ? 0 : stroke;
+      for (uint8_t y = firstRow; y < firstRow + stroke; ++y) {
+        setDecorationPixel(x, y);
       }
     }
   } else if (decoration == GlyphDecoration::cedilla) {
@@ -518,8 +629,7 @@ bool synthesizeGlyph(
           && x >= center && x < center + stroke;
         const bool hook = y >= decorationHeight - stroke && x <= center;
         if (stem || hook) {
-          setBitmapPixel(generatedBitmap, result.width, result.height,
-            decorationLeft + x - glyphLeft, decorationTop + y - glyphTop);
+          setDecorationPixel(x, y);
         }
       }
     }

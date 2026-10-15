@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 // Select the physical panel scan type: 4 for 1/4 scan, 8 for 1/8 scan.
@@ -14,7 +15,7 @@
 #endif
 
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "0.9.0"
+#define FIRMWARE_VERSION "0.9.1"
 #endif
 
 namespace AppConfig {
@@ -34,7 +35,20 @@ constexpr uint32_t apRestartDelayMs = 500;
 constexpr uint32_t apHealthCheckIntervalMs = 5000;
 constexpr uint32_t staAttemptIntervalMs = 60000;
 constexpr uint32_t staAttemptDurationMs = 10000;
+// With "require login from the STA network" enabled in the Wi-Fi settings,
+// requests arriving through the STA (LAN) interface must authenticate with
+// HTTP Digest using this user name and the AP password. Clients of the local
+// AP already proved knowledge of that password when they joined the AP.
+constexpr char portalUser[] = "admin";
+constexpr char portalRealm[] = "STEP-RGB";
 } // namespace Network
+
+namespace TimeSync {
+constexpr char defaultNtpServer[] = "pool.ntp.org";
+// POSIX TZ string for Turkey (UTC+3, no daylight saving time).
+constexpr char defaultTimeZone[] = "<+03>-3";
+constexpr uint32_t rtcWriteMinimumIntervalMs = 60000;
+} // namespace TimeSync
 
 namespace Hub75Pins {
 // ESP32-S3 LCD_CAM/GDMA parallel output group. These pins are all exposed on
@@ -64,14 +78,14 @@ constexpr int rtcSdaPin = i2cSdaPin;
 constexpr int rtcSclPin = i2cSclPin;
 
 namespace Buzzer {
-constexpr int8_t pin = 14;
+constexpr int8_t pin = 13;
 constexpr uint8_t startupToggleCount = 6;
 constexpr uint32_t startupToggleIntervalMs = 30;
 } // namespace Buzzer
 
 namespace StatusLeds {
-constexpr int8_t accessPointClientPin = 12;
-constexpr int8_t stationConnectedPin = 13;
+constexpr int8_t accessPointClientPin = 14;
+constexpr int8_t stationConnectedPin = 21;
 constexpr uint32_t toggleIntervalMs = 1000;
 } // namespace StatusLeds
 
@@ -89,11 +103,24 @@ constexpr int8_t directionPin = 41;
 constexpr uint8_t defaultSlaveAddress = 1;
 constexpr uint32_t defaultBaudRate = 115200;
 constexpr uint8_t maximumReadRegisters = 64;
+constexpr size_t maximumFrameSize = 256;
+// true: the UART drives DIR in hardware (RS485 half-duplex mode), so sending
+// never blocks the main loop. false: DIR is toggled in software around a
+// blocking flush, as in firmware 0.9.x.
+constexpr bool hardwareDirectionControl = true;
+constexpr size_t receiveBufferSize = 1024;
+constexpr uint8_t frameQueueLength = 4;
+// A request that waited longer than this in the queue is dropped instead of
+// being answered late; a late reply could collide with the next bus cycle.
+constexpr uint32_t maximumResponseDelayMs = 250;
 } // namespace Modbus
 
 namespace DigitalInput {
-constexpr int8_t pin = 21;
+constexpr int8_t pin = 12;
 constexpr uint32_t debounceMs = 30;
+// The input is sampled by a hardware timer callback, so counting does not
+// depend on how long the main loop is busy.
+constexpr uint32_t samplePeriodUs = 1000;
 } // namespace DigitalInput
 
 constexpr uint16_t panelWidth = 32;

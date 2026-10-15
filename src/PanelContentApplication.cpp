@@ -22,7 +22,7 @@ uint8_t cycleTypeCount(uint8_t mask)
 {
   uint8_t count = 0;
   for (uint8_t type = 0;
-       type <= static_cast<uint8_t>(ContentType::temperature);
+       type <= static_cast<uint8_t>(lastContentType);
        ++type) {
     if (cycleContains(mask, static_cast<ContentType>(type))) {
       ++count;
@@ -34,7 +34,7 @@ uint8_t cycleTypeCount(uint8_t mask)
 ContentType firstCycleType(uint8_t mask, ContentType fallback)
 {
   for (uint8_t type = 0;
-       type <= static_cast<uint8_t>(ContentType::temperature);
+       type <= static_cast<uint8_t>(lastContentType);
        ++type) {
     const ContentType candidate = static_cast<ContentType>(type);
     if (cycleContains(mask, candidate)) {
@@ -59,7 +59,7 @@ ContentType advanceCycleType(
   while (steps > 0) {
     type = static_cast<uint8_t>(
       (type + 1U)
-      % (static_cast<uint8_t>(ContentType::temperature) + 1U));
+      % (static_cast<uint8_t>(lastContentType) + 1U));
     if (cycleContains(mask, static_cast<ContentType>(type))) {
       --steps;
     }
@@ -128,7 +128,8 @@ void PanelContentApplication::update()
     if (activeType == ContentType::date && dateTime.day != lastClockDay_) {
       redrawRequired = true;
     }
-    if (activeType == ContentType::temperature
+    if ((activeType == ContentType::temperature
+         || activeType == ContentType::humidity)
         && temperatureRevision != lastTemperatureRevision_) {
       redrawRequired = true;
     }
@@ -207,6 +208,23 @@ bool PanelContentApplication::renderingPaused() const
   return renderingPaused_;
 }
 
+PanelContentApplication::ClipArea PanelContentApplication::clipArea(
+  const ContentItemSettings &item) const
+{
+  ClipArea area;
+  if (item.scrollArea == ScrollArea::panel) {
+    const uint8_t columns = settings_.panel().columns;
+    area.left = (item.panelIndex % columns) * AppConfig::panelWidth;
+    area.top = (item.panelIndex / columns) * AppConfig::panelHeight;
+    area.right = area.left + AppConfig::panelWidth;
+    area.bottom = area.top + AppConfig::panelHeight;
+  } else {
+    area.right = static_cast<int16_t>(panel_.width());
+    area.bottom = static_cast<int16_t>(panel_.height());
+  }
+  return area;
+}
+
 void PanelContentApplication::draw()
 {
   Adafruit_GFX &matrix = panel_.canvas();
@@ -268,7 +286,8 @@ void PanelContentApplication::draw()
       color,
       hideColon,
       item.rotation,
-      item.fontId);
+      item.fontId,
+      clipArea(item));
   }
 
   panel_.present();
@@ -368,6 +387,9 @@ void PanelContentApplication::updateScroll(
     originX,
     originY);
 
+  // Text leaves the box's area on one side and re-enters on the other: the
+  // own panel, or the whole display for boxes set to use it.
+  const ClipArea area = clipArea(item);
   switch (item.direction) {
     case ScrollDirection::left: {
       const int16_t previousOffset = runtime.offsetX;
@@ -377,8 +399,8 @@ void PanelContentApplication::updateScroll(
           && runtime.offsetX <= 0) {
         itemRuntime.scrollTourCompleted = true;
       }
-      if (originX + runtime.offsetX + static_cast<int16_t>(textWidth) < 0) {
-        runtime.offsetX = panel_.width() - originX;
+      if (originX + runtime.offsetX + static_cast<int16_t>(textWidth) < area.left) {
+        runtime.offsetX = area.right - originX;
         itemRuntime.scrollWrapped = true;
       }
       break;
@@ -391,8 +413,8 @@ void PanelContentApplication::updateScroll(
           && runtime.offsetX >= 0) {
         itemRuntime.scrollTourCompleted = true;
       }
-      if (originX + runtime.offsetX >= static_cast<int16_t>(panel_.width())) {
-        runtime.offsetX = -static_cast<int16_t>(textWidth) - originX;
+      if (originX + runtime.offsetX >= area.right) {
+        runtime.offsetX = area.left - static_cast<int16_t>(textWidth) - originX;
         itemRuntime.scrollWrapped = true;
       }
       break;
@@ -405,8 +427,8 @@ void PanelContentApplication::updateScroll(
           && runtime.offsetY <= 0) {
         itemRuntime.scrollTourCompleted = true;
       }
-      if (originY + runtime.offsetY + static_cast<int16_t>(textHeight) < 0) {
-        runtime.offsetY = panel_.height() - originY;
+      if (originY + runtime.offsetY + static_cast<int16_t>(textHeight) < area.top) {
+        runtime.offsetY = area.bottom - originY;
         itemRuntime.scrollWrapped = true;
       }
       break;
@@ -419,8 +441,8 @@ void PanelContentApplication::updateScroll(
           && runtime.offsetY >= 0) {
         itemRuntime.scrollTourCompleted = true;
       }
-      if (originY + runtime.offsetY >= static_cast<int16_t>(panel_.height())) {
-        runtime.offsetY = -static_cast<int16_t>(textHeight) - originY;
+      if (originY + runtime.offsetY >= area.bottom) {
+        runtime.offsetY = area.top - static_cast<int16_t>(textHeight) - originY;
         itemRuntime.scrollWrapped = true;
       }
       break;
@@ -437,7 +459,10 @@ void PanelContentApplication::buildText(
   size_t bufferSize) const
 {
   if (item.boxKind == ContentBoxKind::valueBox) {
-    valueBoxes_.formatValue(index, buffer, bufferSize);
+    // The unit suffix may contain Turkish letters or the degree sign.
+    char rawText[64] = {};
+    valueBoxes_.formatValue(index, rawText, sizeof(rawText));
+    FontCatalog::encodeText(item.fontId, rawText, buffer, bufferSize);
     return;
   }
 
@@ -486,7 +511,30 @@ void PanelContentApplication::buildText(
           buffer,
           bufferSize);
       } else {
-        strlcpy(buffer, "TMP?", bufferSize);
+        // "TMP?", "SHT?" or "HDC?" names the sensor that is missing.
+        strlcpy(buffer, temperature_.missingText(), bufferSize);
+      }
+      break;
+    case ContentType::humidity:
+      if (!temperature_.humiditySupported()) {
+        // The selected sensor (TMP112) has no humidity channel.
+        strlcpy(buffer, "--%", bufferSize);
+      } else if (temperature_.ready()) {
+        if (item.temperatureDisplayFormat == TemperatureDisplayFormat::integer) {
+          snprintf(
+            buffer,
+            bufferSize,
+            "%ld%%",
+            std::lround(temperature_.relativeHumidity()));
+        } else {
+          snprintf(
+            buffer,
+            bufferSize,
+            "%.1f%%",
+            static_cast<double>(temperature_.relativeHumidity()));
+        }
+      } else {
+        strlcpy(buffer, temperature_.missingText(), bufferSize);
       }
       break;
     case ContentType::text:
@@ -565,7 +613,8 @@ void PanelContentApplication::drawRotatedText(
   uint16_t color,
   bool hideColon,
   TextRotation rotation,
-  uint8_t fontId)
+  uint8_t fontId,
+  const ClipArea &clip)
 {
   int16_t boundsX = 0;
   int16_t boundsY = 0;
@@ -646,7 +695,12 @@ void PanelContentApplication::drawRotatedText(
               default:
                 break;
             }
-            matrix.drawPixel(x + rotatedX, y + rotatedY, color);
+            const int16_t pixelX = x + rotatedX;
+            const int16_t pixelY = y + rotatedY;
+            if (pixelX >= clip.left && pixelX < clip.right
+                && pixelY >= clip.top && pixelY < clip.bottom) {
+              matrix.drawPixel(pixelX, pixelY, color);
+            }
           }
           bits <<= 1;
         }

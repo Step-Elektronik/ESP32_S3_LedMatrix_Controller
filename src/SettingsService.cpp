@@ -2,8 +2,11 @@
 
 #include <cmath>
 #include <cstring>
+#include <memory>
+#include <new>
 
 #include "AppConfig.h"
+#include "UiText.h"
 
 namespace {
 
@@ -162,6 +165,41 @@ struct LegacyContentSettingsV5 {
   LegacyContentItemSettingsV5 items[maxContentItems];
 };
 
+// Schema v7 adds the clipping/scroll area and the ValueBox decimal places.
+// The ValueBox unit suffix reuses the existing text field.
+struct LegacyContentItemSettingsV6 {
+  ContentBoxKind boxKind;
+  uint8_t panelIndex;
+  ContentType type;
+  TextRotation rotation;
+  int16_t x;
+  int16_t y;
+  uint8_t red;
+  uint8_t green;
+  uint8_t blue;
+  bool scrolling;
+  ScrollDirection direction;
+  uint8_t speedPixelsPerSecond;
+  bool cycleEnabled;
+  uint8_t cycleContentMask;
+  uint16_t cycleIntervalSeconds;
+  char text[maxContentTextLength];
+  ValueSource valueSource;
+  ModbusValueType modbusValueType;
+  CounterDirection counterDirection;
+  uint16_t registerAddress;
+  int32_t initialIntegerValue;
+  float initialFloatValue;
+  TemperatureDisplayFormat temperatureDisplayFormat;
+  uint8_t fontId;
+};
+
+struct LegacyContentSettingsV6 {
+  uint16_t schemaVersion;
+  uint8_t count;
+  LegacyContentItemSettingsV6 items[maxContentItems];
+};
+
 bool isValidSsid(const String &ssid, bool allowEmpty)
 {
   const size_t length = ssid.length();
@@ -172,6 +210,33 @@ bool isValidPassword(const String &password, bool allowEmpty)
 {
   const size_t length = password.length();
   return (allowEmpty && length == 0) || (length >= 8 && length <= 63);
+}
+
+bool containsOnly(const String &value, const char *allowedPunctuation)
+{
+  for (size_t index = 0; index < value.length(); ++index) {
+    const char character = value[index];
+    const bool alphanumeric = (character >= 'a' && character <= 'z')
+      || (character >= 'A' && character <= 'Z')
+      || (character >= '0' && character <= '9');
+    if (!alphanumeric && std::strchr(allowedPunctuation, character) == nullptr) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool isValidNtpServer(const String &server)
+{
+  return server.length() >= 1 && server.length() <= 63
+      && containsOnly(server, ".-:");
+}
+
+bool isValidTimeZone(const String &timeZone)
+{
+  // POSIX TZ strings such as "<+03>-3" or "CET-1CEST,M3.5.0,M10.5.0/3".
+  return timeZone.length() >= 1 && timeZone.length() <= 63
+      && containsOnly(timeZone, "<>+-,./:");
 }
 
 bool storeString(Preferences &preferences, const char *key, const String &value)
@@ -252,6 +317,21 @@ void initializeFontDefault(ContentItemSettings &item)
   item.fontId = FontModel::defaultFontId;
 }
 
+void applyContentV7Defaults(ContentItemSettings &item)
+{
+  // Designs created before schema v7 wrapped scrolling text around the whole
+  // display and showed float ValueBoxes with one decimal place.
+  item.scrollArea = ScrollArea::display;
+  item.valueDecimals = item.boxKind == ContentBoxKind::valueBox
+      && item.valueSource == ValueSource::modbus
+      && item.modbusValueType == ModbusValueType::ieee754Float
+    ? 1
+    : 0;
+  if (item.boxKind == ContentBoxKind::valueBox) {
+    item.text[0] = '\0';
+  }
+}
+
 void migrateLegacyContent(
   const LegacyContentSettingsV1 &legacy,
   ContentSettings &content)
@@ -280,6 +360,7 @@ void migrateLegacyContent(
     std::memcpy(target.text, source.text, sizeof(target.text));
     initializeCycleDefaults(target);
     initializeFontDefault(target);
+    applyContentV7Defaults(target);
   }
 }
 
@@ -311,6 +392,7 @@ void migrateLegacyContent(
     std::memcpy(target.text, source.text, sizeof(target.text));
     initializeCycleDefaults(target);
     initializeFontDefault(target);
+    applyContentV7Defaults(target);
   }
 }
 
@@ -345,6 +427,7 @@ void migrateLegacyContent(
     target.cycleIntervalSeconds = source.cycleIntervalSeconds;
     std::memcpy(target.text, source.text, sizeof(target.text));
     initializeFontDefault(target);
+    applyContentV7Defaults(target);
   }
 }
 
@@ -386,6 +469,7 @@ void migrateLegacyContent(
     target.initialFloatValue = source.initialFloatValue;
     target.temperatureDisplayFormat = TemperatureDisplayFormat::decimal;
     initializeFontDefault(target);
+    applyContentV7Defaults(target);
   }
 }
 
@@ -427,7 +511,70 @@ void migrateLegacyContent(
     target.initialFloatValue = source.initialFloatValue;
     target.temperatureDisplayFormat = source.temperatureDisplayFormat;
     initializeFontDefault(target);
+    applyContentV7Defaults(target);
   }
+}
+
+void migrateLegacyContent(
+  const LegacyContentSettingsV6 &legacy,
+  ContentSettings &content)
+{
+  std::memset(&content, 0, sizeof(content));
+  content.schemaVersion = contentSchemaVersion;
+  content.count = legacy.count;
+
+  const uint8_t itemCount = legacy.count > maxContentItems
+    ? maxContentItems
+    : legacy.count;
+  for (uint8_t index = 0; index < itemCount; ++index) {
+    const LegacyContentItemSettingsV6 &source = legacy.items[index];
+    ContentItemSettings &target = content.items[index];
+    target.boxKind = source.boxKind;
+    target.panelIndex = source.panelIndex;
+    target.type = source.type;
+    target.rotation = source.rotation;
+    target.x = source.x;
+    target.y = source.y;
+    target.red = source.red;
+    target.green = source.green;
+    target.blue = source.blue;
+    target.scrolling = source.scrolling;
+    target.direction = source.direction;
+    target.speedPixelsPerSecond = source.speedPixelsPerSecond;
+    target.cycleEnabled = source.cycleEnabled;
+    target.cycleContentMask = source.cycleContentMask;
+    target.cycleIntervalSeconds = source.cycleIntervalSeconds;
+    std::memcpy(target.text, source.text, sizeof(target.text));
+    target.valueSource = source.valueSource;
+    target.modbusValueType = source.modbusValueType;
+    target.counterDirection = source.counterDirection;
+    target.registerAddress = source.registerAddress;
+    target.initialIntegerValue = source.initialIntegerValue;
+    target.initialFloatValue = source.initialFloatValue;
+    target.temperatureDisplayFormat = source.temperatureDisplayFormat;
+    target.fontId = source.fontId;
+    applyContentV7Defaults(target);
+  }
+}
+
+// Copies a stored blob into a heap-allocated legacy layout and upgrades it.
+// The loop task stack is only 8 KB, so the ~2.7 KB layouts stay off it.
+template <typename LegacySettings>
+bool migrateStoredContent(
+  const uint8_t *blob,
+  size_t blobSize,
+  ContentSettings &content)
+{
+  if (blobSize != sizeof(LegacySettings)) {
+    return false;
+  }
+  std::unique_ptr<LegacySettings> legacy(new (std::nothrow) LegacySettings);
+  if (!legacy) {
+    return false;
+  }
+  std::memcpy(legacy.get(), blob, sizeof(LegacySettings));
+  migrateLegacyContent(*legacy, content);
+  return true;
 }
 
 } // namespace
@@ -454,6 +601,9 @@ bool SettingsService::begin()
   network_.apPassword = preferences_.getString("ap_pass", network_.apPassword);
   network_.staSsid = preferences_.getString("sta_ssid", network_.staSsid);
   network_.staPassword = preferences_.getString("sta_pass", network_.staPassword);
+  network_.stationPortalAuthentication = preferences_.getBool(
+    "sta_auth",
+    network_.stationPortalAuthentication);
 
   communication_.baudRate = preferences_.getUInt(
     "uart_baud",
@@ -511,74 +661,19 @@ bool SettingsService::begin()
     alarmSettingsRepaired = true;
   }
 
-  bool contentSettingsRepaired = false;
-  const size_t storedContentSize = preferences_.getBytesLength("content");
-  uint16_t storedContentVersion = 0;
-  if (storedContentSize > 0 && storedContentSize <= sizeof(ContentSettings)) {
-    ContentSettings storedContentProbe;
-    std::memset(&storedContentProbe, 0, sizeof(storedContentProbe));
-    if (preferences_.getBytes(
-          "content",
-          &storedContentProbe,
-          sizeof(storedContentProbe)) == storedContentSize) {
-      storedContentVersion = storedContentProbe.schemaVersion;
-    }
-  }
+  timeSync_.ntpEnabled = preferences_.getBool("ntp_enabled", timeSync_.ntpEnabled);
+  timeSync_.ntpServer = preferences_.getString("ntp_server", timeSync_.ntpServer);
+  timeSync_.timeZone = preferences_.getString("ntp_tz", timeSync_.timeZone);
 
-  if (storedContentVersion == contentSchemaVersion
-      && storedContentSize == sizeof(ContentSettings)) {
-    if (preferences_.getBytes("content", &content_, sizeof(content_))
-        != sizeof(content_)) {
-      contentSettingsRepaired = true;
-    }
-  } else if (storedContentVersion == 5
-             && storedContentSize == sizeof(LegacyContentSettingsV5)) {
-    LegacyContentSettingsV5 legacy;
-    std::memset(&legacy, 0, sizeof(legacy));
-    preferences_.getBytes("content", &legacy, sizeof(legacy));
-    migrateLegacyContent(legacy, content_);
-    Serial.println("Content settings upgraded from schema v5 to font schema v6.");
-    contentSettingsRepaired = true;
-  } else if (storedContentVersion == 4
-             && storedContentSize == sizeof(LegacyContentSettingsV4)) {
-    LegacyContentSettingsV4 legacy;
-    std::memset(&legacy, 0, sizeof(legacy));
-    preferences_.getBytes("content", &legacy, sizeof(legacy));
-    migrateLegacyContent(legacy, content_);
-    Serial.println("Content settings upgraded from schema v4 to font schema v6.");
-    contentSettingsRepaired = true;
-  } else if (storedContentVersion == 3
-             && storedContentSize == sizeof(LegacyContentSettingsV3)) {
-    LegacyContentSettingsV3 legacy;
-    std::memset(&legacy, 0, sizeof(legacy));
-    preferences_.getBytes("content", &legacy, sizeof(legacy));
-    migrateLegacyContent(legacy, content_);
-    Serial.println("Content settings upgraded from schema v3 to font schema v6.");
-    contentSettingsRepaired = true;
-  } else if (storedContentVersion == 2
-             && storedContentSize == sizeof(LegacyContentSettingsV2)) {
-    LegacyContentSettingsV2 legacy;
-    std::memset(&legacy, 0, sizeof(legacy));
-    preferences_.getBytes("content", &legacy, sizeof(legacy));
-    migrateLegacyContent(legacy, content_);
-    Serial.println("Content settings upgraded from schema v2 to font schema v6.");
-    contentSettingsRepaired = true;
-  } else if (storedContentVersion == 1
-             && storedContentSize == sizeof(LegacyContentSettingsV1)) {
-    LegacyContentSettingsV1 legacy;
-    std::memset(&legacy, 0, sizeof(legacy));
-    preferences_.getBytes("content", &legacy, sizeof(legacy));
-    migrateLegacyContent(legacy, content_);
-    Serial.println("Content settings upgraded from schema v1 to font schema v6.");
-    contentSettingsRepaired = true;
-  } else {
-    contentSettingsRepaired = true;
-  }
+  bool temperatureSensorRepaired = !loadTemperatureSensor();
+
+  bool contentSettingsRepaired = !loadContent();
 
   bool panelSettingsRepaired = false;
   bool networkSettingsRepaired = false;
   bool communicationSettingsRepaired = false;
   bool sleepSettingsRepaired = false;
+  bool timeSyncSettingsRepaired = false;
   String validationError;
   if (!validatePanel(panel_, validationError)) {
     Serial.printf("Invalid stored panel settings: %s; defaults restored.\n", validationError.c_str());
@@ -617,6 +712,22 @@ bool SettingsService::begin()
     sleepSettingsRepaired = true;
   }
 
+  if (!validateTimeSync(timeSync_, validationError)) {
+    Serial.printf("Invalid stored time sync settings: %s; defaults restored.\n", validationError.c_str());
+    timeSync_ = TimeSyncSettings{
+      false,
+      AppConfig::TimeSync::defaultNtpServer,
+      AppConfig::TimeSync::defaultTimeZone
+    };
+    timeSyncSettingsRepaired = true;
+  }
+
+  if (!validateTemperatureSensor(temperatureSensor_, validationError)) {
+    Serial.printf("Invalid stored temperature sensor settings: %s; defaults restored.\n", validationError.c_str());
+    temperatureSensor_ = TemperatureSensorSettings{};
+    temperatureSensorRepaired = true;
+  }
+
   if (!validateAlarms(alarms_, validationError)) {
     Serial.printf("Invalid stored alarm settings: %s; defaults restored.\n", validationError.c_str());
     initializeDefaultAlarms(alarms_);
@@ -646,6 +757,12 @@ bool SettingsService::begin()
   if (sleepSettingsRepaired && !saveSleep(sleep_)) {
     Serial.println("ERROR: Safe sleep defaults could not be stored.");
   }
+  if (timeSyncSettingsRepaired && !saveTimeSync(timeSync_)) {
+    Serial.println("ERROR: Safe time sync defaults could not be stored.");
+  }
+  if (temperatureSensorRepaired && !saveTemperatureSensor(temperatureSensor_)) {
+    Serial.println("ERROR: Temperature sensor settings could not be stored.");
+  }
   if (alarmSettingsRepaired && !saveAlarms(alarms_)) {
     Serial.println("ERROR: Safe alarm defaults could not be stored.");
   }
@@ -653,6 +770,106 @@ bool SettingsService::begin()
     Serial.println("ERROR: Safe content defaults could not be stored.");
   }
   return true;
+}
+
+bool SettingsService::loadTemperatureSensor()
+{
+  // Returns false when the settings did not exist yet and must be stored.
+  if (!preferences_.isKey("ts_type")) {
+    // Earlier firmware supported only the SHT40 at 0x44. Devices that already
+    // have a stored design keep it; new devices start with the TMP112.
+    temperatureSensor_ = TemperatureSensorSettings{};
+    if (preferences_.isKey("content")) {
+      temperatureSensor_.type = TemperatureSensorType::sht40;
+    }
+    return false;
+  }
+
+  TemperatureSensorSettings &sensor = temperatureSensor_;
+  sensor.type = static_cast<TemperatureSensorType>(
+    preferences_.getUChar("ts_type", static_cast<uint8_t>(sensor.type)));
+  sensor.measurementIntervalSeconds =
+    preferences_.getUShort("ts_interval", sensor.measurementIntervalSeconds);
+  sensor.temperatureOffsetTenths =
+    preferences_.getShort("ts_t_offset", sensor.temperatureOffsetTenths);
+  sensor.humidityOffsetTenths =
+    preferences_.getShort("ts_h_offset", sensor.humidityOffsetTenths);
+  sensor.sht40Address = preferences_.getUChar("ts_sht_addr", sensor.sht40Address);
+  sensor.sht40Precision = static_cast<Sht40Precision>(preferences_.getUChar(
+    "ts_sht_prec",
+    static_cast<uint8_t>(sensor.sht40Precision)));
+  sensor.tmp112Address = preferences_.getUChar("ts_tmp_addr", sensor.tmp112Address);
+  sensor.tmp112ConversionRate = static_cast<Tmp112ConversionRate>(preferences_.getUChar(
+    "ts_tmp_rate",
+    static_cast<uint8_t>(sensor.tmp112ConversionRate)));
+  sensor.tmp112ExtendedMode = preferences_.getBool("ts_tmp_ext", sensor.tmp112ExtendedMode);
+  sensor.hdc2022Address = preferences_.getUChar("ts_hdc_addr", sensor.hdc2022Address);
+  sensor.hdc2022TemperatureResolution = static_cast<Hdc2022Resolution>(preferences_.getUChar(
+    "ts_hdc_tres",
+    static_cast<uint8_t>(sensor.hdc2022TemperatureResolution)));
+  sensor.hdc2022HumidityResolution = static_cast<Hdc2022Resolution>(preferences_.getUChar(
+    "ts_hdc_hres",
+    static_cast<uint8_t>(sensor.hdc2022HumidityResolution)));
+  return true;
+}
+
+bool SettingsService::loadContent()
+{
+  // Returns true when the stored design is current and can be used as-is;
+  // false when it was migrated or replaced and must be stored again.
+  const size_t storedSize = preferences_.getBytesLength("content");
+  if (storedSize < sizeof(uint16_t) || storedSize > sizeof(ContentSettings)) {
+    return false;
+  }
+
+  std::unique_ptr<uint8_t[]> blob(new (std::nothrow) uint8_t[storedSize]);
+  if (!blob
+      || preferences_.getBytes("content", blob.get(), storedSize) != storedSize) {
+    return false;
+  }
+
+  uint16_t storedVersion = 0;
+  std::memcpy(&storedVersion, blob.get(), sizeof(storedVersion));
+  if (storedVersion == contentSchemaVersion) {
+    if (storedSize != sizeof(ContentSettings)) {
+      return false;
+    }
+    std::memcpy(&content_, blob.get(), sizeof(content_));
+    return true;
+  }
+
+  bool migrated = false;
+  switch (storedVersion) {
+    case 6:
+      migrated = migrateStoredContent<LegacyContentSettingsV6>(blob.get(), storedSize, content_);
+      break;
+    case 5:
+      migrated = migrateStoredContent<LegacyContentSettingsV5>(blob.get(), storedSize, content_);
+      break;
+    case 4:
+      migrated = migrateStoredContent<LegacyContentSettingsV4>(blob.get(), storedSize, content_);
+      break;
+    case 3:
+      migrated = migrateStoredContent<LegacyContentSettingsV3>(blob.get(), storedSize, content_);
+      break;
+    case 2:
+      migrated = migrateStoredContent<LegacyContentSettingsV2>(blob.get(), storedSize, content_);
+      break;
+    case 1:
+      migrated = migrateStoredContent<LegacyContentSettingsV1>(blob.get(), storedSize, content_);
+      break;
+    default:
+      break;
+  }
+  if (migrated) {
+    Serial.printf(
+      "Content settings upgraded from schema v%u to schema v%u.\n",
+      storedVersion,
+      contentSchemaVersion);
+  } else {
+    initializeDefaultContent(content_);
+  }
+  return false;
 }
 
 const PanelSettings &SettingsService::panel() const
@@ -675,6 +892,16 @@ const PanelSleepSettings &SettingsService::sleep() const
   return sleep_;
 }
 
+const TimeSyncSettings &SettingsService::timeSync() const
+{
+  return timeSync_;
+}
+
+const TemperatureSensorSettings &SettingsService::temperatureSensor() const
+{
+  return temperatureSensor_;
+}
+
 const AlarmSettings &SettingsService::alarms() const
 {
   return alarms_;
@@ -683,6 +910,11 @@ const AlarmSettings &SettingsService::alarms() const
 const ContentSettings &SettingsService::content() const
 {
   return content_;
+}
+
+bool SettingsService::usesDefaultApPassword() const
+{
+  return network_.apPassword == AppConfig::Network::apPassword;
 }
 
 bool SettingsService::savePanel(const PanelSettings &settings)
@@ -717,6 +949,8 @@ bool SettingsService::saveNetwork(const NetworkSettings &settings)
   stored = storeString(preferences_, "ap_pass", settings.apPassword) && stored;
   stored = storeString(preferences_, "sta_ssid", settings.staSsid) && stored;
   stored = storeString(preferences_, "sta_pass", settings.staPassword) && stored;
+  stored = preferences_.putBool("sta_auth", settings.stationPortalAuthentication) == 1
+    && stored;
   if (stored) {
     network_ = settings;
   }
@@ -763,6 +997,48 @@ bool SettingsService::saveSleep(const PanelSleepSettings &settings)
       static_cast<uint8_t>(settings.dayMode)) == 1;
   if (stored) {
     sleep_ = settings;
+  }
+  return stored;
+}
+
+bool SettingsService::saveTimeSync(const TimeSyncSettings &settings)
+{
+  String error;
+  if (!ready_ || !validateTimeSync(settings, error)) {
+    return false;
+  }
+
+  bool stored = preferences_.putBool("ntp_enabled", settings.ntpEnabled) == 1;
+  stored = storeString(preferences_, "ntp_server", settings.ntpServer) && stored;
+  stored = storeString(preferences_, "ntp_tz", settings.timeZone) && stored;
+  if (stored) {
+    timeSync_ = settings;
+  }
+  return stored;
+}
+
+bool SettingsService::saveTemperatureSensor(const TemperatureSensorSettings &settings)
+{
+  String error;
+  if (!ready_ || !validateTemperatureSensor(settings, error)) {
+    return false;
+  }
+
+  const bool stored =
+    preferences_.putUChar("ts_type", static_cast<uint8_t>(settings.type)) == 1
+    && preferences_.putUShort("ts_interval", settings.measurementIntervalSeconds) == 2
+    && preferences_.putShort("ts_t_offset", settings.temperatureOffsetTenths) == 2
+    && preferences_.putShort("ts_h_offset", settings.humidityOffsetTenths) == 2
+    && preferences_.putUChar("ts_sht_addr", settings.sht40Address) == 1
+    && preferences_.putUChar("ts_sht_prec", static_cast<uint8_t>(settings.sht40Precision)) == 1
+    && preferences_.putUChar("ts_tmp_addr", settings.tmp112Address) == 1
+    && preferences_.putUChar("ts_tmp_rate", static_cast<uint8_t>(settings.tmp112ConversionRate)) == 1
+    && preferences_.putBool("ts_tmp_ext", settings.tmp112ExtendedMode) == 1
+    && preferences_.putUChar("ts_hdc_addr", settings.hdc2022Address) == 1
+    && preferences_.putUChar("ts_hdc_tres", static_cast<uint8_t>(settings.hdc2022TemperatureResolution)) == 1
+    && preferences_.putUChar("ts_hdc_hres", static_cast<uint8_t>(settings.hdc2022HumidityResolution)) == 1;
+  if (stored) {
+    temperatureSensor_ = settings;
   }
   return stored;
 }
@@ -815,12 +1091,16 @@ bool SettingsService::factoryReset()
   const bool networkStored = saveNetwork(network_);
   const bool communicationStored = saveCommunication(communication_);
   const bool sleepStored = saveSleep(sleep_);
+  const bool timeSyncStored = saveTimeSync(timeSync_);
+  const bool temperatureSensorStored = saveTemperatureSensor(temperatureSensor_);
   const bool alarmsStored = saveAlarms(alarms_);
   const bool contentStored = saveContent(content_);
   return panelStored
       && networkStored
       && communicationStored
       && sleepStored
+      && timeSyncStored
+      && temperatureSensorStored
       && alarmsStored
       && contentStored;
 }
@@ -828,25 +1108,25 @@ bool SettingsService::factoryReset()
 bool SettingsService::validatePanel(const PanelSettings &settings, String &error)
 {
   if (settings.scanDivisor != 4 && settings.scanDivisor != 8) {
-    error = "Tarama orani 1/4 veya 1/8 olmalidir.";
+    error = UI_TEXT("Tarama oranı 1/4 veya 1/8 olmalıdır.");
     return false;
   }
   if (settings.rows < 1 || settings.rows > AppConfig::maxPanelRows) {
-    error = "Satir sayisi gecersiz.";
+    error = UI_TEXT("Satır sayısı geçersiz.");
     return false;
   }
   if (settings.columns < 1 || settings.columns > AppConfig::maxPanelColumns) {
-    error = "Sutun sayisi gecersiz.";
+    error = UI_TEXT("Sütun sayısı geçersiz.");
     return false;
   }
   if (settings.panelCount() > AppConfig::maxPanelCount) {
-    error = "Toplam panel sayisi izin verilen siniri asiyor.";
+    error = UI_TEXT("Toplam panel sayısı izin verilen sınırı aşıyor.");
     return false;
   }
   const uint8_t connectionStyle = static_cast<uint8_t>(settings.connectionStyle);
   if (connectionStyle < static_cast<uint8_t>(PanelConnectionStyle::topLeftDown)
       || connectionStyle > static_cast<uint8_t>(PanelConnectionStyle::bottomLeftUpZigzag)) {
-    error = "Panel baglanti sekli gecersiz.";
+    error = UI_TEXT("Panel bağlantı şekli geçersiz.");
     return false;
   }
   error.clear();
@@ -856,23 +1136,23 @@ bool SettingsService::validatePanel(const PanelSettings &settings, String &error
 bool SettingsService::validateNetwork(const NetworkSettings &settings, String &error)
 {
   if (!isValidSsid(settings.apSsid, false)) {
-    error = "AP SSID 1-32 karakter olmalidir.";
+    error = UI_TEXT("AP SSID 1-32 karakter olmalıdır.");
     return false;
   }
   if (!isValidPassword(settings.apPassword, false)) {
-    error = "AP parolasi 8-63 karakter olmalidir.";
+    error = UI_TEXT("AP parolası 8-63 karakter olmalıdır.");
     return false;
   }
   if (!isValidSsid(settings.staSsid, true)) {
-    error = "STA SSID en fazla 32 karakter olabilir.";
+    error = UI_TEXT("STA SSID en fazla 32 karakter olabilir.");
     return false;
   }
   if (!isValidPassword(settings.staPassword, true)) {
-    error = "STA parolasi bos veya 8-63 karakter olmalidir.";
+    error = UI_TEXT("STA parolası boş veya 8-63 karakter olmalıdır.");
     return false;
   }
   if (settings.staSsid.isEmpty() && !settings.staPassword.isEmpty()) {
-    error = "STA SSID bosken parola girilemez.";
+    error = UI_TEXT("STA SSID boşken parola girilemez.");
     return false;
   }
   error.clear();
@@ -884,7 +1164,7 @@ bool SettingsService::validateCommunication(
   String &error)
 {
   if (settings.slaveAddress < 1 || settings.slaveAddress > 247) {
-    error = "Modbus Slave ID 1-247 araliginda olmalidir.";
+    error = UI_TEXT("Modbus Slave ID 1-247 aralığında olmalıdır.");
     return false;
   }
   const bool baudRateValid = settings.baudRate == 4800
@@ -893,21 +1173,21 @@ bool SettingsService::validateCommunication(
     || settings.baudRate == 57600
     || settings.baudRate == 115200;
   if (!baudRateValid) {
-    error = "UART baudrate gecersiz.";
+    error = UI_TEXT("UART baudrate geçersiz.");
     return false;
   }
   if (settings.dataBits < 5 || settings.dataBits > 8) {
-    error = "UART data size 5-8 bit olmalidir.";
+    error = UI_TEXT("UART data size 5-8 bit olmalıdır.");
     return false;
   }
   if (static_cast<uint8_t>(settings.parity)
       > static_cast<uint8_t>(UartParity::odd)) {
-    error = "UART parity ayari gecersiz.";
+    error = UI_TEXT("UART parity ayarı geçersiz.");
     return false;
   }
   if (static_cast<uint8_t>(settings.handshake)
       > static_cast<uint8_t>(UartHandshake::rs485Direction)) {
-    error = "UART handshake ayari gecersiz.";
+    error = UI_TEXT("UART handshake ayarı geçersiz.");
     return false;
   }
   error.clear();
@@ -921,20 +1201,103 @@ bool SettingsService::validateSleep(
   constexpr uint16_t minutesPerDay = 24 * 60;
   if (settings.startMinuteOfDay >= minutesPerDay
       || settings.endMinuteOfDay >= minutesPerDay) {
-    error = "Uyku baslangic veya bitis saati gecersiz.";
+    error = UI_TEXT("Uyku başlangıç veya bitiş saati geçersiz.");
     return false;
   }
   if (settings.startMinuteOfDay == settings.endMinuteOfDay) {
-    error = "Uyku baslangic ve bitis saati farkli olmalidir.";
+    error = UI_TEXT("Uyku başlangıç ve bitiş saati farklı olmalıdır.");
     return false;
   }
   if (static_cast<uint8_t>(settings.dayMode)
       > static_cast<uint8_t>(ScheduleDayMode::weekdays)) {
-    error = "Uyku acilis gunu gecersiz.";
+    error = UI_TEXT("Uyku açılış günü geçersiz.");
     return false;
   }
   error.clear();
   return true;
+}
+
+bool SettingsService::validateTimeSync(
+  const TimeSyncSettings &settings,
+  String &error)
+{
+  if (!isValidNtpServer(settings.ntpServer)) {
+    error = UI_TEXT("NTP sunucusu 1-63 karakter olmalı; yalnızca harf, rakam, nokta, tire ve iki nokta içerebilir.");
+    return false;
+  }
+  if (!isValidTimeZone(settings.timeZone)) {
+    error = UI_TEXT("Saat dilimi 1-63 karakterlik geçerli bir POSIX TZ değeri olmalıdır.");
+    return false;
+  }
+  error.clear();
+  return true;
+}
+
+bool SettingsService::validateTemperatureSensor(
+  const TemperatureSensorSettings &settings,
+  String &error)
+{
+  if (static_cast<uint8_t>(settings.type)
+      > static_cast<uint8_t>(TemperatureSensorType::hdc2022)) {
+    error = UI_TEXT("Sıcaklık sensörü modeli geçersiz.");
+    return false;
+  }
+  if (settings.measurementIntervalSeconds < minimumSensorIntervalSeconds
+      || settings.measurementIntervalSeconds > maximumSensorIntervalSeconds) {
+    error = UI_TEXT("Ölçüm aralığı 1-60 saniye olmalıdır.");
+    return false;
+  }
+  if (settings.temperatureOffsetTenths < -maximumTemperatureOffsetTenths
+      || settings.temperatureOffsetTenths > maximumTemperatureOffsetTenths) {
+    error = UI_TEXT("Sıcaklık düzeltmesi -10.0 ile 10.0 °C arasında olmalıdır.");
+    return false;
+  }
+  if (settings.humidityOffsetTenths < -maximumHumidityOffsetTenths
+      || settings.humidityOffsetTenths > maximumHumidityOffsetTenths) {
+    error = UI_TEXT("Nem düzeltmesi -20.0 ile 20.0 %RH arasında olmalıdır.");
+    return false;
+  }
+  if ((settings.sht40Address != 0x44 && settings.sht40Address != 0x45)
+      || static_cast<uint8_t>(settings.sht40Precision)
+           > static_cast<uint8_t>(Sht40Precision::low)) {
+    error = UI_TEXT("SHT40 ayarları geçersiz.");
+    return false;
+  }
+  const bool tmp112AddressValid =
+    (settings.tmp112Address >= 0x48 && settings.tmp112Address <= 0x4B)
+    || (settings.tmp112Address >= 0x40 && settings.tmp112Address <= 0x43);
+  if (!tmp112AddressValid
+      || static_cast<uint8_t>(settings.tmp112ConversionRate)
+           > static_cast<uint8_t>(Tmp112ConversionRate::hz8)) {
+    error = UI_TEXT("TMP112 ayarları geçersiz.");
+    return false;
+  }
+  if ((settings.hdc2022Address != 0x40 && settings.hdc2022Address != 0x41)
+      || static_cast<uint8_t>(settings.hdc2022TemperatureResolution)
+           > static_cast<uint8_t>(Hdc2022Resolution::bits9)
+      || static_cast<uint8_t>(settings.hdc2022HumidityResolution)
+           > static_cast<uint8_t>(Hdc2022Resolution::bits9)) {
+    error = UI_TEXT("HDC2022 ayarları geçersiz.");
+    return false;
+  }
+  error.clear();
+  return true;
+}
+
+bool SettingsService::contentUsesHumidity(const ContentSettings &settings)
+{
+  for (uint8_t index = 0; index < settings.count && index < maxContentItems; ++index) {
+    const ContentItemSettings &item = settings.items[index];
+    if (item.boxKind != ContentBoxKind::textBox) {
+      continue;
+    }
+    if (item.cycleEnabled
+        ? (item.cycleContentMask & contentTypeMask(ContentType::humidity)) != 0
+        : item.type == ContentType::humidity) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool SettingsService::validateAlarms(
@@ -943,30 +1306,30 @@ bool SettingsService::validateAlarms(
 {
   if (settings.schemaVersion != alarmSchemaVersion
       || settings.count > maximumAlarmCount) {
-    error = "Alarm veri formati gecersiz.";
+    error = UI_TEXT("Alarm veri formatı geçersiz.");
     return false;
   }
 
   for (uint8_t index = 0; index < settings.count; ++index) {
     const AlarmItemSettings &alarm = settings.items[index];
     if (alarm.hour > 23 || alarm.minute > 59) {
-      error = "Alarm saati gecersiz.";
+      error = UI_TEXT("Alarm saati geçersiz.");
       return false;
     }
     if (alarm.durationSeconds < minimumAlarmDurationSeconds
         || alarm.durationSeconds > maximumAlarmDurationSeconds) {
-      error = "Alarm tetiklenme suresi 1-3600 saniye olmalidir.";
+      error = UI_TEXT("Alarm tetiklenme süresi 1-3600 saniye olmalıdır.");
       return false;
     }
     if (static_cast<uint8_t>(alarm.dayMode)
         > static_cast<uint8_t>(ScheduleDayMode::customDays)) {
-      error = "Alarm gun secimi gecersiz.";
+      error = UI_TEXT("Alarm gün seçimi geçersiz.");
       return false;
     }
     if ((alarm.customDayMask & ~alarmAllDaysMask) != 0
         || (alarm.dayMode == ScheduleDayMode::customDays
             && alarm.customDayMask == 0)) {
-      error = "Alarm icin en az bir gecerli gun secilmelidir.";
+      error = UI_TEXT("Alarm için en az bir geçerli gün seçilmelidir.");
       return false;
     }
   }
@@ -982,7 +1345,7 @@ bool SettingsService::validateContent(
 {
   if (settings.schemaVersion != contentSchemaVersion
       || settings.count > maxContentItems) {
-    error = "Icerik formati gecersiz.";
+    error = UI_TEXT("İçerik formatı geçersiz.");
     return false;
   }
 
@@ -994,20 +1357,20 @@ bool SettingsService::validateContent(
     const ContentItemSettings &item = settings.items[index];
     if (static_cast<uint8_t>(item.boxKind)
         > static_cast<uint8_t>(ContentBoxKind::valueBox)) {
-      error = "Icerik kutusu tipi gecersiz.";
+      error = UI_TEXT("İçerik kutusu tipi geçersiz.");
       return false;
     }
     if (item.panelIndex >= panel.panelCount()) {
-      error = "Icerik kutusu panel numarasi gecersiz.";
+      error = UI_TEXT("İçerik kutusu panel numarası geçersiz.");
       return false;
     }
     if (++panelItemCounts[item.panelIndex] > maxBoxesPerPanel) {
-      error = "Bir panelde toplam en fazla iki TextBox/ValueBox olabilir.";
+      error = UI_TEXT("Bir panelde toplam en fazla iki TextBox/ValueBox olabilir.");
       return false;
     }
     if (item.x < 0 || item.x >= displayWidth
         || item.y < 0 || item.y >= displayHeight) {
-      error = "Icerik kutusu koordinati ekran disinda.";
+      error = UI_TEXT("İçerik kutusu koordinatı ekran dışında.");
       return false;
     }
 
@@ -1015,90 +1378,103 @@ bool SettingsService::validateContent(
       (item.y / AppConfig::panelHeight) * panel.columns
       + (item.x / AppConfig::panelWidth);
     if (expectedPanel != item.panelIndex) {
-      error = "Icerik kutusu koordinati ile panel numarasi uyusmuyor.";
+      error = UI_TEXT("İçerik kutusu koordinatı ile panel numarası uyuşmuyor.");
       return false;
     }
 
     if (static_cast<uint8_t>(item.rotation)
         > static_cast<uint8_t>(TextRotation::degrees270)) {
-      error = "Icerik kutusu dondurme acisi gecersiz.";
+      error = UI_TEXT("İçerik kutusu döndürme açısı geçersiz.");
       return false;
     }
     if (item.fontId >= FontModel::fontCount) {
-      error = "Icerik kutusu yazi tipi gecersiz.";
+      error = UI_TEXT("İçerik kutusu yazı tipi geçersiz.");
+      return false;
+    }
+    if (static_cast<uint8_t>(item.scrollArea)
+        > static_cast<uint8_t>(ScrollArea::display)) {
+      error = UI_TEXT("İçerik kutusu gösterim alanı geçersiz.");
+      return false;
+    }
+    if (std::memchr(item.text, '\0', sizeof(item.text)) == nullptr) {
+      error = UI_TEXT("İçerik kutusu metni sonlandırılmamış.");
       return false;
     }
     if (item.boxKind == ContentBoxKind::textBox) {
       if (static_cast<uint8_t>(item.temperatureDisplayFormat)
           > static_cast<uint8_t>(TemperatureDisplayFormat::integer)) {
-        error = "TextBox sicaklik gosterim tipi gecersiz.";
+        error = UI_TEXT("TextBox sıcaklık gösterim tipi geçersiz.");
         return false;
       }
       const uint8_t type = static_cast<uint8_t>(item.type);
-      if (type > static_cast<uint8_t>(ContentType::temperature)) {
-        error = "TextBox veri tipi gecersiz.";
-        return false;
-      }
-      if (std::memchr(item.text, '\0', sizeof(item.text)) == nullptr) {
-        error = "TextBox metni sonlandirilmamis.";
+      if (type > static_cast<uint8_t>(lastContentType)) {
+        error = UI_TEXT("TextBox veri tipi geçersiz.");
         return false;
       }
       if (!item.cycleEnabled
           && item.type == ContentType::text
           && item.text[0] == '\0') {
-        error = "Metin TextBox'u bos olamaz.";
+        error = UI_TEXT("Metin TextBox'u boş olamaz.");
         return false;
       }
       if ((item.cycleContentMask & ~allCycleContentMask) != 0) {
-        error = "TextBox dongu icerigi gecersiz.";
+        error = UI_TEXT("TextBox döngü içeriği geçersiz.");
         return false;
       }
       if (item.cycleEnabled) {
         if (item.cycleContentMask == 0) {
-          error = "Dongu icin en az bir bilgi secilmelidir.";
+          error = UI_TEXT("Döngü için en az bir bilgi seçilmelidir.");
           return false;
         }
         if (item.cycleIntervalSeconds < minimumCycleIntervalSeconds
             || item.cycleIntervalSeconds > maximumCycleIntervalSeconds) {
-          error = "Dongu suresi 1-3600 saniye olmalidir.";
+          error = UI_TEXT("Döngü süresi 1-3600 saniye olmalıdır.");
           return false;
         }
         if ((item.cycleContentMask & contentTypeMask(ContentType::text)) != 0
             && item.text[0] == '\0') {
-          error = "Dongudeki yazi icerigi bos olamaz.";
+          error = UI_TEXT("Döngüdeki yazı içeriği boş olamaz.");
           return false;
         }
       }
     } else {
       if (static_cast<uint8_t>(item.valueSource)
           > static_cast<uint8_t>(ValueSource::digitalInput)) {
-        error = "ValueBox veri kaynagi gecersiz.";
+        error = UI_TEXT("ValueBox veri kaynağı geçersiz.");
         return false;
       }
       if (static_cast<uint8_t>(item.modbusValueType)
           > static_cast<uint8_t>(ModbusValueType::ieee754Float)) {
-        error = "ValueBox Modbus veri tipi gecersiz.";
+        error = UI_TEXT("ValueBox Modbus veri tipi geçersiz.");
         return false;
       }
       if (static_cast<uint8_t>(item.counterDirection)
           > static_cast<uint8_t>(CounterDirection::down)) {
-        error = "ValueBox sayac yonu gecersiz.";
+        error = UI_TEXT("ValueBox sayaç yönü geçersiz.");
         return false;
       }
       if (!std::isfinite(item.initialFloatValue)) {
-        error = "ValueBox baslangic float degeri gecersiz.";
+        error = UI_TEXT("ValueBox başlangıç float değeri geçersiz.");
+        return false;
+      }
+      if (item.valueDecimals > maxValueDecimals) {
+        error = UI_TEXT("ValueBox ondalık basamak sayısı 0-3 olmalıdır.");
+        return false;
+      }
+      if (std::strlen(item.text) > maxValueSuffixLength) {
+        error = UI_TEXT("ValueBox birimi en fazla 15 bayt olabilir.");
         return false;
       }
       if (item.valueSource == ValueSource::modbus) {
         if (item.modbusValueType == ModbusValueType::signedInteger16
             && (item.initialIntegerValue < INT16_MIN
                 || item.initialIntegerValue > INT16_MAX)) {
-          error = "Modbus integer baslangic degeri -32768 ile 32767 arasinda olmalidir.";
+          error = UI_TEXT("Modbus integer başlangıç değeri -32768 ile 32767 arasında olmalıdır.");
           return false;
         }
         if (item.modbusValueType == ModbusValueType::ieee754Float
             && item.registerAddress == UINT16_MAX) {
-          error = "IEEE-754 float icin son register adresi kullanilamaz.";
+          error = UI_TEXT("IEEE-754 float için son register adresi kullanılamaz.");
           return false;
         }
 
@@ -1115,7 +1491,7 @@ bool SettingsService::validateContent(
           const uint32_t previousEnd = previousStart
             + (previous.modbusValueType == ModbusValueType::ieee754Float ? 1U : 0U);
           if (itemStart <= previousEnd && previousStart <= itemEnd) {
-            error = "Modbus ValueBox register adresleri birbiriyle cakismamalidir.";
+            error = UI_TEXT("Modbus ValueBox register adresleri birbiriyle çakışmamalıdır.");
             return false;
           }
         }
@@ -1123,11 +1499,11 @@ bool SettingsService::validateContent(
     }
     if (static_cast<uint8_t>(item.direction)
         > static_cast<uint8_t>(ScrollDirection::down)) {
-      error = "Kaydirma yonu gecersiz.";
+      error = UI_TEXT("Kaydırma yönü geçersiz.");
       return false;
     }
     if (item.speedPixelsPerSecond < 1 || item.speedPixelsPerSecond > 100) {
-      error = "Kaydirma hizi 1-100 piksel/saniye olmalidir.";
+      error = UI_TEXT("Kaydırma hızı 1-100 piksel/saniye olmalıdır.");
       return false;
     }
   }
@@ -1153,6 +1529,12 @@ void SettingsService::loadDefaults()
   };
   communication_ = CommunicationSettings{};
   sleep_ = PanelSleepSettings{};
+  timeSync_ = TimeSyncSettings{
+    false,
+    AppConfig::TimeSync::defaultNtpServer,
+    AppConfig::TimeSync::defaultTimeZone
+  };
+  temperatureSensor_ = TemperatureSensorSettings{};
   initializeDefaultAlarms(alarms_);
   initializeDefaultContent(content_);
 }

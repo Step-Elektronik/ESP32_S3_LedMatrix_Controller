@@ -1,11 +1,37 @@
 #include "ValueBoxApplication.h"
 
 #include <Arduino.h>
+#include <cmath>
 #include <cstring>
+#include <driver/gpio.h>
 #include <limits.h>
+#include <memory>
+#include <new>
 
 #include "AppConfig.h"
 #include "SettingsService.h"
+
+namespace {
+
+constexpr uint32_t debounceSamples =
+  AppConfig::DigitalInput::debounceMs * 1000U
+  / AppConfig::DigitalInput::samplePeriodUs;
+static_assert(debounceSamples > 0, "Debounce time must cover at least one sample");
+
+uint32_t floatBits(float value)
+{
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
+bool usesFloat(const ContentItemSettings &item)
+{
+  return item.valueSource == ValueSource::modbus
+      && item.modbusValueType == ModbusValueType::ieee754Float;
+}
+
+} // namespace
 
 ValueBoxApplication::ValueBoxApplication(SettingsService &settings)
   : settings_(settings)
@@ -15,15 +41,35 @@ ValueBoxApplication::ValueBoxApplication(SettingsService &settings)
 void ValueBoxApplication::begin()
 {
   pinMode(AppConfig::DigitalInput::pin, INPUT_PULLDOWN);
-  digitalInputRawState_ = digitalRead(AppConfig::DigitalInput::pin) == HIGH;
-  digitalInputStableState_ = digitalInputRawState_;
-  digitalInputArmed_ = false;
-  digitalInputChangedAt_ = millis();
+  samplerLevel_ = digitalRead(AppConfig::DigitalInput::pin) == HIGH;
+  samplerStableSamples_ = 0;
+  samplerArmed_ = false;
+  pendingRisingEdges_.store(0);
+
+  esp_timer_create_args_t timerArguments = {};
+  timerArguments.callback = &ValueBoxApplication::sampleDigitalInput;
+  timerArguments.arg = this;
+  timerArguments.dispatch_method = ESP_TIMER_TASK;
+  timerArguments.name = "counter_input";
+  esp_err_t result = esp_timer_create(&timerArguments, &sampleTimer_);
+  if (result == ESP_OK) {
+    result = esp_timer_start_periodic(
+      sampleTimer_,
+      AppConfig::DigitalInput::samplePeriodUs);
+  }
+  if (result != ESP_OK) {
+    Serial.printf(
+      "ERROR: Digital counter sampling timer could not be started: %s\n",
+      esp_err_to_name(result));
+  }
+
   ready_ = true;
   reload();
   Serial.printf(
-    "Digital counter input ready on GPIO %d without internal pull; waiting for LOW before rising-edge trigger.\n",
-    AppConfig::DigitalInput::pin);
+    "Digital counter input ready on GPIO %d with internal pull-down; %lu ms debounce, sampled every %lu us.\n",
+    AppConfig::DigitalInput::pin,
+    static_cast<unsigned long>(AppConfig::DigitalInput::debounceMs),
+    static_cast<unsigned long>(AppConfig::DigitalInput::samplePeriodUs));
 }
 
 void ValueBoxApplication::update()
@@ -32,35 +78,28 @@ void ValueBoxApplication::update()
     return;
   }
 
-  const uint32_t now = millis();
-  const bool rawState = digitalRead(AppConfig::DigitalInput::pin) == HIGH;
-  if (rawState != digitalInputRawState_) {
-    digitalInputRawState_ = rawState;
-    digitalInputChangedAt_ = now;
-  }
-
-  if (!digitalInputArmed_) {
-    if (!rawState
-        && now - digitalInputChangedAt_ >= AppConfig::DigitalInput::debounceMs) {
-      digitalInputStableState_ = false;
-      digitalInputArmed_ = true;
-    }
-    return;
-  }
-
-  if (rawState != digitalInputStableState_
-      && now - digitalInputChangedAt_ >= AppConfig::DigitalInput::debounceMs) {
-    digitalInputStableState_ = rawState;
-    if (digitalInputStableState_) {
-      handleDigitalInputEdge();
-      digitalInputArmed_ = false;
-    }
+  const uint32_t edges = pendingRisingEdges_.exchange(0);
+  if (edges > 0) {
+    applyDigitalInputEdges(edges);
   }
 }
 
 void ValueBoxApplication::reload()
 {
+  // Keep the current value of every ValueBox whose source did not change, so
+  // moving, recoloring or adding boxes does not reset counters or the last
+  // Modbus value. Changing the source or the initial value restarts it.
+  std::unique_ptr<RuntimeValue[]> previous(
+    new (std::nothrow) RuntimeValue[maxContentItems]);
+  bool previousUsed[maxContentItems] = {};
+  if (previous) {
+    for (uint8_t index = 0; index < maxContentItems; ++index) {
+      previous[index] = runtime_[index];
+    }
+  }
+
   const ContentSettings &content = settings_.content();
+  uint8_t preserved = 0;
   for (uint8_t index = 0; index < maxContentItems; ++index) {
     runtime_[index] = {};
     if (index >= content.count) {
@@ -71,8 +110,30 @@ void ValueBoxApplication::reload()
     if (item.boxKind != ContentBoxKind::valueBox) {
       continue;
     }
-    runtime_[index].integerValue = item.initialIntegerValue;
-    runtime_[index].floatValue = item.initialFloatValue;
+
+    RuntimeValue next = initialRuntime(item);
+    if (previous) {
+      // Prefer the box at the same position, then any other unused match.
+      int16_t match = -1;
+      if (!previousUsed[index] && sameSource(previous[index], next)) {
+        match = index;
+      }
+      for (uint8_t candidate = 0; match < 0 && candidate < maxContentItems; ++candidate) {
+        if (!previousUsed[candidate] && sameSource(previous[candidate], next)) {
+          match = candidate;
+        }
+      }
+      if (match >= 0) {
+        previousUsed[match] = true;
+        next.integerValue = previous[match].integerValue;
+        next.floatValue = previous[match].floatValue;
+        ++preserved;
+      }
+    }
+    runtime_[index] = next;
+  }
+  if (preserved > 0) {
+    Serial.printf("ValueBox reload kept %u current value(s).\n", preserved);
   }
   ++revision_;
 }
@@ -97,20 +158,50 @@ void ValueBoxApplication::formatValue(
     return;
   }
 
-  if (item.valueSource == ValueSource::modbus
-      && item.modbusValueType == ModbusValueType::ieee754Float) {
+  const uint8_t decimals = item.valueDecimals > maxValueDecimals
+    ? maxValueDecimals
+    : item.valueDecimals;
+  if (usesFloat(item)) {
     snprintf(
       buffer,
       bufferSize,
-      "%.1f",
+      "%.*f",
+      static_cast<int>(decimals),
       static_cast<double>(runtime_[contentIndex].floatValue));
-  } else {
+  } else if (decimals == 0) {
     snprintf(
       buffer,
       bufferSize,
       "%ld",
       static_cast<long>(runtime_[contentIndex].integerValue));
+  } else {
+    // Fixed decimal point, e.g. register value 1234 with 2 decimals -> 12.34.
+    static constexpr uint32_t divisors[] = {1U, 10U, 100U, 1000U};
+    const int64_t value = runtime_[contentIndex].integerValue;
+    const uint64_t magnitude = static_cast<uint64_t>(value < 0 ? -value : value);
+    snprintf(
+      buffer,
+      bufferSize,
+      "%s%llu.%0*llu",
+      value < 0 ? "-" : "",
+      static_cast<unsigned long long>(magnitude / divisors[decimals]),
+      static_cast<int>(decimals),
+      static_cast<unsigned long long>(magnitude % divisors[decimals]));
   }
+  strlcat(buffer, item.text, bufferSize);
+}
+
+bool ValueBoxApplication::currentNumber(uint8_t contentIndex, double &value) const
+{
+  const ContentSettings &content = settings_.content();
+  if (contentIndex >= content.count
+      || content.items[contentIndex].boxKind != ContentBoxKind::valueBox) {
+    return false;
+  }
+  value = usesFloat(content.items[contentIndex])
+    ? static_cast<double>(runtime_[contentIndex].floatValue)
+    : static_cast<double>(runtime_[contentIndex].integerValue);
+  return std::isfinite(value);
 }
 
 uint32_t ValueBoxApplication::revision() const
@@ -135,8 +226,7 @@ bool ValueBoxApplication::readHoldingRegister(
     return true;
   }
 
-  uint32_t bits = 0;
-  std::memcpy(&bits, &runtime_[contentIndex].floatValue, sizeof(bits));
+  const uint32_t bits = floatBits(runtime_[contentIndex].floatValue);
   value = wordIndex == 0
     ? static_cast<uint16_t>(bits >> 16)
     : static_cast<uint16_t>(bits & 0xffffU);
@@ -184,8 +274,8 @@ bool ValueBoxApplication::writeHoldingRegisters(
       continue;
     }
 
-    uint32_t bits = 0;
-    std::memcpy(&bits, &runtime_[contentIndex].floatValue, sizeof(bits));
+    const uint32_t previousBits = floatBits(runtime_[contentIndex].floatValue);
+    uint32_t bits = previousBits;
     if (wordIndex == 0) {
       bits = (bits & 0x0000ffffUL)
         | (static_cast<uint32_t>(values[offset]) << 16);
@@ -193,15 +283,8 @@ bool ValueBoxApplication::writeHoldingRegisters(
       bits = (bits & 0xffff0000UL) | values[offset];
     }
 
-    float nextValue = 0.0F;
-    std::memcpy(&nextValue, &bits, sizeof(nextValue));
-    uint32_t previousBits = 0;
-    std::memcpy(
-      &previousBits,
-      &runtime_[contentIndex].floatValue,
-      sizeof(previousBits));
     if (previousBits != bits) {
-      runtime_[contentIndex].floatValue = nextValue;
+      std::memcpy(&runtime_[contentIndex].floatValue, &bits, sizeof(bits));
       changed = true;
     }
   }
@@ -210,6 +293,69 @@ bool ValueBoxApplication::writeHoldingRegisters(
     ++revision_;
   }
   return true;
+}
+
+ValueBoxApplication::RuntimeValue ValueBoxApplication::initialRuntime(
+  const ContentItemSettings &item)
+{
+  RuntimeValue runtime;
+  runtime.active = true;
+  runtime.source = item.valueSource;
+  runtime.modbusValueType = item.modbusValueType;
+  runtime.registerAddress = item.registerAddress;
+  runtime.initialIntegerValue = item.initialIntegerValue;
+  runtime.initialFloatBits = floatBits(item.initialFloatValue);
+  runtime.integerValue = item.initialIntegerValue;
+  runtime.floatValue = item.initialFloatValue;
+  return runtime;
+}
+
+bool ValueBoxApplication::sameSource(
+  const RuntimeValue &left,
+  const RuntimeValue &right)
+{
+  if (!left.active || !right.active || left.source != right.source) {
+    return false;
+  }
+  if (left.source == ValueSource::digitalInput) {
+    // The counting direction only affects future edges.
+    return left.initialIntegerValue == right.initialIntegerValue;
+  }
+  if (left.registerAddress != right.registerAddress
+      || left.modbusValueType != right.modbusValueType) {
+    return false;
+  }
+  return left.modbusValueType == ModbusValueType::ieee754Float
+    ? left.initialFloatBits == right.initialFloatBits
+    : left.initialIntegerValue == right.initialIntegerValue;
+}
+
+void ValueBoxApplication::sampleDigitalInput(void *context)
+{
+  // Runs every samplePeriodUs in the esp_timer task, independent of the main
+  // loop. A rising edge counts after the input stayed LOW and then HIGH for
+  // the full debounce time; the loop applies the counted edges later.
+  auto *self = static_cast<ValueBoxApplication *>(context);
+  const bool level =
+    gpio_get_level(static_cast<gpio_num_t>(AppConfig::DigitalInput::pin)) != 0;
+  if (level != self->samplerLevel_) {
+    self->samplerLevel_ = level;
+    self->samplerStableSamples_ = 0;
+    return;
+  }
+  if (self->samplerStableSamples_ >= debounceSamples) {
+    return;
+  }
+  if (++self->samplerStableSamples_ < debounceSamples) {
+    return;
+  }
+
+  if (!level) {
+    self->samplerArmed_ = true;
+  } else if (self->samplerArmed_) {
+    self->samplerArmed_ = false;
+    self->pendingRisingEdges_.fetch_add(1);
+  }
 }
 
 bool ValueBoxApplication::findModbusRegister(
@@ -241,7 +387,7 @@ bool ValueBoxApplication::findModbusRegister(
   return false;
 }
 
-void ValueBoxApplication::handleDigitalInputEdge()
+void ValueBoxApplication::applyDigitalInputEdges(uint32_t edges)
 {
   bool changed = false;
   const ContentSettings &content = settings_.content();
@@ -253,13 +399,20 @@ void ValueBoxApplication::handleDigitalInputEdge()
     }
 
     int32_t &value = runtime_[index].integerValue;
+    int64_t next = value;
     if (item.counterDirection == CounterDirection::up) {
-      if (value < INT32_MAX) {
-        ++value;
-        changed = true;
+      next += edges;
+      if (next > INT32_MAX) {
+        next = INT32_MAX;
       }
-    } else if (value > INT32_MIN) {
-      --value;
+    } else {
+      next -= edges;
+      if (next < INT32_MIN) {
+        next = INT32_MIN;
+      }
+    }
+    if (next != value) {
+      value = static_cast<int32_t>(next);
       changed = true;
     }
   }
@@ -268,5 +421,3 @@ void ValueBoxApplication::handleDigitalInputEdge()
     ++revision_;
   }
 }
-
-

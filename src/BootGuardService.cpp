@@ -1,6 +1,7 @@
 #include "BootGuardService.h"
 
 #include <Arduino.h>
+#include <esp_system.h>
 
 #include "AppConfig.h"
 
@@ -8,6 +9,23 @@ namespace {
 
 constexpr char preferencesNamespace[] = "boot-guard";
 constexpr char failureCounterKey[] = "fail_count";
+
+// The reset reason tells how the previous boot ended. Only crashes, watchdog
+// resets and brownouts mean that boot was unstable; switching the power off,
+// pressing reset or a planned software restart breaks the failure chain.
+bool previousBootFailed(esp_reset_reason_t reason)
+{
+  switch (reason) {
+    case ESP_RST_PANIC:
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:
+    case ESP_RST_BROWNOUT:
+      return true;
+    default:
+      return false;
+  }
+}
 
 } // namespace
 
@@ -18,19 +36,28 @@ bool BootGuardService::begin()
     return false;
   }
 
-  uint8_t failureCount = preferences_.getUChar(failureCounterKey, 0);
-  if (failureCount < UINT8_MAX) {
-    ++failureCount;
+  const uint8_t storedCount = preferences_.getUChar(failureCounterKey, 0);
+  const esp_reset_reason_t resetReason = esp_reset_reason();
+  uint8_t failureCount = 0;
+  if (previousBootFailed(resetReason)) {
+    failureCount = storedCount < UINT8_MAX ? storedCount + 1 : storedCount;
   }
 
-  if (preferences_.putUChar(failureCounterKey, failureCount) != 1) {
+  // Count this boot as unstable until it runs long enough; a crash before
+  // that point leaves the value in place for the next boot to evaluate.
+  if (failureCount != storedCount
+      && preferences_.putUChar(failureCounterKey, failureCount) != 1) {
     Serial.println("ERROR: Boot guard counter could not be stored.");
     return false;
   }
 
   bootStartedAt_ = millis();
   ready_ = true;
-  Serial.printf("Boot guard counter: %u/%u\n", failureCount, AppConfig::bootFailureLimit);
+  counterCleared_ = failureCount == 0;
+  Serial.printf(
+    "Boot guard: %u consecutive abnormal reset(s), limit %u.\n",
+    failureCount,
+    AppConfig::bootFailureLimit);
 
   if (failureCount > AppConfig::bootFailureLimit) {
     factoryResetRequired_ = true;
@@ -68,7 +95,8 @@ bool BootGuardService::factoryResetRequired() const
 
 bool BootGuardService::resetCounter()
 {
-  if (preferences_.putUChar(failureCounterKey, 0) != 1) {
+  if (preferences_.getUChar(failureCounterKey, 0) != 0
+      && preferences_.putUChar(failureCounterKey, 0) != 1) {
     Serial.println("ERROR: Boot guard counter could not be cleared.");
     return false;
   }
@@ -76,5 +104,3 @@ bool BootGuardService::resetCounter()
   counterCleared_ = true;
   return true;
 }
-
-

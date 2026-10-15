@@ -60,6 +60,88 @@ function validateInlineScripts(html, pageName) {
   }
 }
 
+// Translation table rows: [Turkish source, en, de, es, ar].
+function translationRows() {
+  const match = i18nSource.match(/const rows = (\[[\s\S]*?\n {2}\]);/);
+  if (!match) {
+    throw new Error('Translation rows were not found in portal-i18n.js.');
+  }
+  const rows = new Function(`return ${match[1]};`)();
+  const keys = new Set();
+  for (const [index, row] of rows.entries()) {
+    if (!Array.isArray(row) || row.length !== 5
+        || row.some(value => typeof value !== 'string' || value === '')) {
+      throw new Error(`portal-i18n.js row ${index + 1} must contain 5 non-empty strings.`);
+    }
+    if (keys.has(row[0])) {
+      throw new Error(`portal-i18n.js contains a duplicate key: ${row[0]}`);
+    }
+    keys.add(row[0]);
+  }
+  return keys;
+}
+
+function sourceFiles(directory, extensions) {
+  return fs.readdirSync(directory, {withFileTypes: true}).flatMap(entry => {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFiles(entryPath, extensions);
+    return extensions.includes(path.extname(entry.name)) ? [entryPath] : [];
+  });
+}
+
+// Every message the firmware sends to the portal is marked with UI_TEXT();
+// without a translation the portal would show it in Turkish in every language.
+function missingServerTranslations(keys) {
+  const missing = new Set();
+  const files = [
+    ...sourceFiles(path.join(projectRoot, 'src'), ['.cpp', '.h']),
+    ...sourceFiles(path.join(projectRoot, 'include'), ['.h']).filter(file => !file.endsWith('UiText.h'))
+  ];
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf8');
+    for (const match of source.matchAll(/UI_TEXT\("((?:[^"\\]|\\.)*)"\)/g)) {
+      const text = match[1].replace(/\\(.)/g, '$1');
+      if (!keys.has(text)) missing.add(`${path.relative(projectRoot, file)}: ${text}`);
+    }
+  }
+  return [...missing];
+}
+
+// Visible page text and the literal messages the page scripts pass to t(),
+// setStatus(), showStatus() and setFirmwareProgress().
+function missingPageTranslations(html, pageName, keys) {
+  // Technical terms that read the same in every language, and placeholders
+  // that the page script replaces with translated text after loading.
+  const untranslated = new Set(['RGB', 'TextBox', 'ValueBox', '+ TextBox', '+ ValueBox',
+    'Modbus RTU', 'STEP-RGB', 'STEP-RGB •', 'UTC', 'firmware.bin', 'Türkçe', 'English',
+    'Deutsch', 'Español', 'العربية', 'admin', 'SSID', 'Baudrate', '5 bit', '6 bit', '7 bit',
+    '8 bit', 'Signed integer (16-bit)', 'Float (IEEE-754)', '#FF0000', '°C, bar, kg',
+    'CET-1CEST,M3.5.0,M10.5.0/3', '10 px/sn', 'Panel —', '0 / 10 alarm']);
+  const decode = text => text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  // I2C addresses with pin/part labels and plain bit/Hz options.
+  const technical = /^(0x[0-9A-F]{2} — [A-Za-z0-9+ ,→-]+|\d+(\.\d+)? (bit|Hz)( — [\d.]+ µs)?)$/;
+  const needsTranslation = text => /[A-Za-zÇĞİÖŞÜçğıöşü]{2}/.test(text)
+    && !untranslated.has(text)
+    && !technical.test(text);
+  const missing = new Set();
+  const markup = html.replace(/<script>[\s\S]*?<\/script>/g, '').replace(/<style>[\s\S]*?<\/style>/g, '');
+  for (const match of markup.matchAll(/>([^<]+)</g)) {
+    const text = decode(match[1].trim());
+    if (text && needsTranslation(text) && !keys.has(text)) missing.add(text);
+  }
+  for (const match of markup.matchAll(/\s(?:placeholder|title|aria-label)="([^"]+)"/g)) {
+    const text = decode(match[1]);
+    if (needsTranslation(text) && !keys.has(text)) missing.add(text);
+  }
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]).join('\n');
+  const literalCalls = /(?:\bt|setStatus|showStatus|setFirmwareProgress\([^,()]*,)\(?\s*'((?:[^'\\]|\\.)*)'/g;
+  for (const match of scripts.matchAll(literalCalls)) {
+    const text = match[1];
+    if (needsTranslation(text) && !keys.has(text)) missing.add(text);
+  }
+  return [...missing].map(text => `${pageName}: ${text}`);
+}
+
 function formatBytes(bytes) {
   const lines = [];
   for (let index = 0; index < bytes.length; index += 16) {
@@ -79,6 +161,15 @@ try {
   new Function(i18nSource);
 } catch (error) {
   throw new Error(`portal-i18n.js is invalid: ${error.message}`);
+}
+const translationKeys = translationRows();
+const missingTranslations = [
+  ...missingServerTranslations(translationKeys),
+  ...missingPageTranslations(homeHtml, 'home', translationKeys),
+  ...missingPageTranslations(settingsHtml, 'settings', translationKeys)
+];
+if (missingTranslations.length > 0) {
+  throw new Error(`Missing translations in web/portal-i18n.js:\n  ${missingTranslations.join('\n  ')}`);
 }
 const homeGzip = gzip(homeHtml);
 const settingsGzip = gzip(settingsHtml);

@@ -15,6 +15,7 @@
 #include "SettingsService.h"
 #include "SystemService.h"
 #include "TemperatureApplication.h"
+#include "TimeSyncApplication.h"
 #include "WatchdogService.h"
 #include "ValueBoxApplication.h"
 #include "WiFiApplication.h"
@@ -28,7 +29,7 @@ SettingsService settingsService;
 PanelDisplay panelDisplay;
 ClockApplication clockApplication;
 AlarmApplication alarmApplication(clockApplication, settingsService);
-TemperatureApplication temperatureApplication;
+TemperatureApplication temperatureApplication(settingsService);
 ValueBoxApplication valueBoxApplication(settingsService);
 ModbusRtuSlaveService modbusRtuSlaveService(
   valueBoxApplication,
@@ -45,6 +46,10 @@ PanelSleepApplication panelSleepApplication(
   settingsService);
 WiFiApplication wifiApplication(settingsService);
 NetworkStatusLedService networkStatusLedService(wifiApplication);
+TimeSyncApplication timeSyncApplication(
+  clockApplication,
+  settingsService,
+  wifiApplication);
 PortalApplication portalApplication(
   settingsService,
   panelDisplay,
@@ -54,6 +59,7 @@ PortalApplication portalApplication(
   valueBoxApplication,
   panelSleepApplication,
   wifiApplication,
+  timeSyncApplication,
   bootGuardService,
   firmwareUpdateService);
 
@@ -88,6 +94,7 @@ void setup()
   // Start networking only after blocking startup tests are complete so mobile
   // captive-portal probes always find a responsive HTTP service.
   wifiApplication.begin();
+  timeSyncApplication.begin();
   portalApplication.begin();
 }
 
@@ -96,6 +103,7 @@ void loop()
   watchdogService.feed();
   bootGuardService.update();
   wifiApplication.update();
+  timeSyncApplication.update();
   networkStatusLedService.update();
   portalApplication.update();
   clockApplication.update();

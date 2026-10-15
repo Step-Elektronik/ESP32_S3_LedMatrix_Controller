@@ -5,6 +5,8 @@
 #include <FontCatalog.h>
 #include <cmath>
 #include <limits.h>
+#include <memory>
+#include <new>
 
 #include "AppConfig.h"
 #include "BootGuardService.h"
@@ -16,6 +18,8 @@
 #include "PortalCompressed.h"
 #include "SettingsService.h"
 #include "TemperatureApplication.h"
+#include "TimeSyncApplication.h"
+#include "UiText.h"
 #include "ValueBoxApplication.h"
 #include "WiFiApplication.h"
 
@@ -26,6 +30,7 @@ constexpr uint32_t colorTestDurationMs = 750;
 constexpr size_t maximumContentBodySize = 8192;
 constexpr size_t fontPreviewHeaderSize = 14;
 constexpr size_t fontPreviewGlyphSize = 8;
+constexpr uint8_t maximumContentFields = 23;
 
 void writeLittleEndian16(uint8_t *target, uint16_t value)
 {
@@ -232,11 +237,13 @@ bool decodePercentText(const String &encoded, String &decoded)
   return true;
 }
 
-uint8_t splitContentRecord(const String &record, String fields[21])
+uint8_t splitContentRecord(
+  const String &record,
+  String fields[maximumContentFields])
 {
   uint8_t field = 0;
   int start = 0;
-  while (field < 20) {
+  while (field < maximumContentFields - 1) {
     const int separator = record.indexOf('|', start);
     if (separator < 0) {
       break;
@@ -269,6 +276,13 @@ bool parseColor(
   return true;
 }
 
+// One record per line, fields separated by '|':
+//  0 panel, 1 type, 2 rotation, 3 x, 4 y, 5 RRGGBB, 6 scrolling, 7 direction,
+//  8 speed, 9 text (percent-encoded; ValueBox: unit suffix), 10 cycle,
+//  11 cycle mask, 12 cycle interval, 13 kind, 14 initial value, 15 source,
+//  16 register, 17 value type, 18 counter direction, 19 temperature format,
+//  20 font, 21 scroll/clip area, 22 ValueBox decimals.
+// Shorter records from older portal versions are still accepted.
 bool parseContentPayload(
   const String &payload,
   ContentSettings &content,
@@ -288,18 +302,19 @@ bool parseContentPayload(
       continue;
     }
     if (content.count >= maxContentItems) {
-      error = "Cok fazla TextBox gonderildi.";
+      error = UI_TEXT("Çok fazla TextBox/ValueBox gönderildi.");
       return false;
     }
 
-    String fields[21];
+    String fields[maximumContentFields];
     const uint8_t fieldCount = splitContentRecord(record, fields);
     if (fieldCount != 10
         && fieldCount != 13
         && fieldCount != 19
         && fieldCount != 20
-        && fieldCount != 21) {
-      error = "TextBox veri formati gecersiz.";
+        && fieldCount != 21
+        && fieldCount != maximumContentFields) {
+      error = UI_TEXT("İçerik kutusu veri formatı geçersiz.");
       return false;
     }
 
@@ -318,8 +333,14 @@ bool parseContentPayload(
     uint8_t counterDirection = 0;
     uint8_t temperatureDisplayFormat = 0;
     uint8_t fontId = FontModel::defaultFontId;
+    uint8_t scrollArea = static_cast<uint8_t>(ScrollArea::display);
+    uint8_t valueDecimals = 0;
     if (!parseUnsignedByte(fields[0], 0, AppConfig::maxPanelCount - 1, item.panelIndex)
-        || !parseUnsignedByte(fields[1], 0, 3, type)
+        || !parseUnsignedByte(
+          fields[1],
+          0,
+          static_cast<uint8_t>(lastContentType),
+          type)
         || !parseUnsignedByte(fields[2], 0, 3, rotation)
         || !parseUnsignedByte(
           fields[3],
@@ -335,14 +356,11 @@ bool parseContentPayload(
         || !parseUnsignedByte(fields[6], 0, 1, scrolling)
         || !parseUnsignedByte(fields[7], 0, 3, direction)
         || !parseUnsignedByte(fields[8], 1, 100, item.speedPixelsPerSecond)) {
-      error = "TextBox alanlarindan biri gecersiz.";
+      error = UI_TEXT("İçerik kutusu alanlarından biri geçersiz.");
       return false;
     }
 
-    if (fieldCount == 13
-        || fieldCount == 19
-        || fieldCount == 20
-        || fieldCount == 21) {
+    if (fieldCount >= 13) {
       if (!parseUnsignedByte(fields[10], 0, 1, cycleEnabled)
           || !parseUnsignedByte(
             fields[11],
@@ -354,15 +372,15 @@ bool parseContentPayload(
             minimumCycleIntervalSeconds,
             maximumCycleIntervalSeconds,
             item.cycleIntervalSeconds)) {
-        error = "TextBox dongu alanlarindan biri gecersiz.";
+        error = UI_TEXT("TextBox döngü alanlarından biri geçersiz.");
         return false;
       }
-    } else if (fieldCount == 10) {
+    } else {
       cycleContentMask = contentTypeMask(static_cast<ContentType>(type));
       item.cycleIntervalSeconds = defaultCycleIntervalSeconds;
     }
 
-    if (fieldCount == 19 || fieldCount == 20 || fieldCount == 21) {
+    if (fieldCount >= 19) {
       if (!parseUnsignedByte(
             fields[13],
             static_cast<uint8_t>(ContentBoxKind::textBox),
@@ -384,7 +402,7 @@ bool parseContentPayload(
             static_cast<uint8_t>(CounterDirection::up),
             static_cast<uint8_t>(CounterDirection::down),
             counterDirection)) {
-        error = "ValueBox alanlarindan biri gecersiz.";
+        error = UI_TEXT("ValueBox alanlarından biri geçersiz.");
         return false;
       }
 
@@ -396,40 +414,59 @@ bool parseContentPayload(
         if (item.valueSource == ValueSource::modbus
             && item.modbusValueType == ModbusValueType::ieee754Float) {
           if (!parseFiniteFloat(fields[14], item.initialFloatValue)) {
-            error = "ValueBox baslangic float degeri gecersiz.";
+            error = UI_TEXT("ValueBox başlangıç float değeri geçersiz.");
             return false;
           }
         } else if (!parseSigned32(fields[14], item.initialIntegerValue)) {
-          error = "ValueBox baslangic integer degeri gecersiz.";
+          error = UI_TEXT("ValueBox başlangıç integer değeri geçersiz.");
           return false;
         }
       }
     }
 
-    if ((fieldCount == 20 || fieldCount == 21)
+    if (fieldCount >= 20
         && !parseUnsignedByte(
           fields[19],
           static_cast<uint8_t>(TemperatureDisplayFormat::decimal),
           static_cast<uint8_t>(TemperatureDisplayFormat::integer),
           temperatureDisplayFormat)) {
-      error = "TextBox sicaklik gosterim tipi gecersiz.";
+      error = UI_TEXT("TextBox sıcaklık gösterim tipi geçersiz.");
       return false;
     }
 
-    if (fieldCount == 21
+    if (fieldCount >= 21
         && !parseUnsignedByte(
           fields[20],
           0,
           FontModel::fontCount - 1,
           fontId)) {
-      error = "Icerik kutusu yazi tipi gecersiz.";
+      error = UI_TEXT("İçerik kutusu yazı tipi geçersiz.");
       return false;
+    }
+
+    if (fieldCount >= maximumContentFields) {
+      if (!parseUnsignedByte(
+            fields[21],
+            static_cast<uint8_t>(ScrollArea::panel),
+            static_cast<uint8_t>(ScrollArea::display),
+            scrollArea)) {
+        error = UI_TEXT("İçerik kutusu gösterim alanı geçersiz.");
+        return false;
+      }
+      if (!parseUnsignedByte(fields[22], 0, maxValueDecimals, valueDecimals)) {
+        error = UI_TEXT("ValueBox ondalık basamak sayısı 0-3 olmalıdır.");
+        return false;
+      }
+    } else if (item.boxKind == ContentBoxKind::valueBox
+               && item.valueSource == ValueSource::modbus
+               && item.modbusValueType == ModbusValueType::ieee754Float) {
+      valueDecimals = 1;
     }
 
     String decodedText;
     if (!decodePercentText(fields[9], decodedText)
         || decodedText.length() >= maxContentTextLength) {
-      error = "TextBox metni cok uzun veya gecersiz.";
+      error = UI_TEXT("İçerik kutusu metni çok uzun veya geçersiz.");
       return false;
     }
 
@@ -444,12 +481,16 @@ bool parseContentPayload(
     item.temperatureDisplayFormat =
       static_cast<TemperatureDisplayFormat>(temperatureDisplayFormat);
     item.fontId = fontId;
+    item.scrollArea = static_cast<ScrollArea>(scrollArea);
+    item.valueDecimals = valueDecimals;
     strlcpy(item.text, decodedText.c_str(), sizeof(item.text));
     if (item.boxKind == ContentBoxKind::valueBox) {
+      // ValueBoxes keep the text field as their unit suffix.
       item.type = ContentType::text;
       item.cycleEnabled = false;
       item.cycleContentMask = contentTypeMask(ContentType::text);
-      item.text[0] = '\0';
+    } else {
+      item.valueDecimals = 0;
     }
     ++content.count;
   }
@@ -494,6 +535,7 @@ PortalApplication::PortalApplication(
   ValueBoxApplication &valueBoxes,
   PanelSleepApplication &panelSleep,
   WiFiApplication &wifi,
+  TimeSyncApplication &timeSync,
   BootGuardService &bootGuard,
   FirmwareUpdateService &firmwareUpdate)
   : settings_(settings),
@@ -504,6 +546,7 @@ PortalApplication::PortalApplication(
     valueBoxes_(valueBoxes),
     panelSleep_(panelSleep),
     wifi_(wifi),
+    timeSync_(timeSync),
     bootGuard_(bootGuard),
     firmwareUpdate_(firmwareUpdate),
     webServer_(AppConfig::Network::httpPort)
@@ -536,70 +579,90 @@ void PortalApplication::update()
 
 void PortalApplication::configureRoutes()
 {
-  webServer_.on("/", HTTP_GET, [this]() {
-    sendHomePage();
-  });
-  webServer_.on("/settings", HTTP_GET, [this]() {
-    sendSettingsPage();
-  });
-  webServer_.on("/i18n.js", HTTP_GET, [this]() {
-    sendI18nScript();
-  });
-  webServer_.on("/firmware.js", HTTP_GET, [this]() {
-    sendFirmwareScript();
-  });
+  onAuthorized("/", HTTP_GET, &PortalApplication::sendHomePage);
+  onAuthorized("/settings", HTTP_GET, &PortalApplication::sendSettingsPage);
+  onAuthorized("/i18n.js", HTTP_GET, &PortalApplication::sendI18nScript);
+  onAuthorized("/firmware.js", HTTP_GET, &PortalApplication::sendFirmwareScript);
 
-  webServer_.on("/api/settings", HTTP_GET, [this]() {
-    sendSettingsJson();
-  });
-  webServer_.on("/api/wifi/status", HTTP_GET, [this]() {
-    sendWifiStatusJson();
-  });
-  webServer_.on("/api/content", HTTP_GET, [this]() {
-    sendContentJson();
-  });
-  webServer_.on("/api/content", HTTP_POST, [this]() {
-    saveContentSettings();
-  });
-  webServer_.on("/api/font", HTTP_GET, [this]() {
-    sendFontPreviewData();
-  });
-  webServer_.on("/api/temperature", HTTP_GET, [this]() {
-    sendTemperatureJson();
-  });
-  webServer_.on("/api/settings/panel", HTTP_POST, [this]() {
-    savePanelSettings();
-  });
-  webServer_.on("/api/settings/clock", HTTP_POST, [this]() {
-    saveClockSettings();
-  });
-  webServer_.on("/api/settings/alarms", HTTP_POST, [this]() {
-    saveAlarmSettings();
-  });
-  webServer_.on("/api/settings/communication", HTTP_POST, [this]() {
-    saveCommunicationSettings();
-  });
-  webServer_.on("/api/settings/wifi", HTTP_POST, [this]() {
-    saveNetworkSettings();
-  });
-  webServer_.on("/api/panel/test", HTTP_POST, [this]() {
-    startPanelColorTest();
-  });
+  onAuthorized("/api/settings", HTTP_GET, &PortalApplication::sendSettingsJson);
+  onAuthorized("/api/wifi/status", HTTP_GET, &PortalApplication::sendWifiStatusJson);
+  onAuthorized("/api/content", HTTP_GET, &PortalApplication::sendContentJson);
+  onAuthorized("/api/content", HTTP_POST, &PortalApplication::saveContentSettings);
+  onAuthorized("/api/font", HTTP_GET, &PortalApplication::sendFontPreviewData);
+  onAuthorized("/api/temperature", HTTP_GET, &PortalApplication::sendTemperatureJson);
+  onAuthorized("/api/settings/panel", HTTP_POST, &PortalApplication::savePanelSettings);
+  onAuthorized("/api/settings/clock", HTTP_POST, &PortalApplication::saveClockSettings);
+  onAuthorized("/api/settings/sleep", HTTP_POST, &PortalApplication::saveSleepSettings);
+  onAuthorized("/api/settings/time-sync", HTTP_POST, &PortalApplication::saveTimeSyncSettings);
+  onAuthorized("/api/settings/temperature-sensor", HTTP_POST, &PortalApplication::saveTemperatureSensorSettings);
+  onAuthorized("/api/settings/alarms", HTTP_POST, &PortalApplication::saveAlarmSettings);
+  onAuthorized("/api/settings/communication", HTTP_POST, &PortalApplication::saveCommunicationSettings);
+  onAuthorized("/api/settings/wifi", HTTP_POST, &PortalApplication::saveNetworkSettings);
+  onAuthorized("/api/panel/test", HTTP_POST, &PortalApplication::startPanelColorTest);
   webServer_.on(
     "/api/firmware/update",
     HTTP_POST,
-    [this]() { finishFirmwareUploadRequest(); },
+    [this]() {
+      if (authorize()) {
+        finishFirmwareUploadRequest();
+      }
+    },
     [this]() { handleFirmwareUpload(); });
 
-  const auto captiveRedirect = [this]() { sendPortalRedirect(); };
-  webServer_.on("/generate_204", HTTP_ANY, captiveRedirect);
-  webServer_.on("/gen_204", HTTP_ANY, captiveRedirect);
-  webServer_.on("/hotspot-detect.html", HTTP_ANY, captiveRedirect);
-  webServer_.on("/library/test/success.html", HTTP_ANY, captiveRedirect);
-  webServer_.on("/connecttest.txt", HTTP_ANY, captiveRedirect);
-  webServer_.on("/ncsi.txt", HTTP_ANY, captiveRedirect);
-  webServer_.on("/fwlink", HTTP_ANY, captiveRedirect);
-  webServer_.onNotFound(captiveRedirect);
+  onAuthorized("/generate_204", HTTP_ANY, &PortalApplication::sendPortalRedirect);
+  onAuthorized("/gen_204", HTTP_ANY, &PortalApplication::sendPortalRedirect);
+  onAuthorized("/hotspot-detect.html", HTTP_ANY, &PortalApplication::sendPortalRedirect);
+  onAuthorized("/library/test/success.html", HTTP_ANY, &PortalApplication::sendPortalRedirect);
+  onAuthorized("/connecttest.txt", HTTP_ANY, &PortalApplication::sendPortalRedirect);
+  onAuthorized("/ncsi.txt", HTTP_ANY, &PortalApplication::sendPortalRedirect);
+  onAuthorized("/fwlink", HTTP_ANY, &PortalApplication::sendPortalRedirect);
+  webServer_.onNotFound([this]() {
+    if (authorize()) {
+      sendPortalRedirect();
+    }
+  });
+}
+
+void PortalApplication::onAuthorized(
+  const char *uri,
+  HTTPMethod method,
+  Handler handler)
+{
+  webServer_.on(uri, method, [this, handler]() {
+    if (authorize()) {
+      (this->*handler)();
+    }
+  });
+}
+
+bool PortalApplication::requestFromStation()
+{
+  return webServer_.client().localIP() != WiFi.softAPIP();
+}
+
+bool PortalApplication::authorized()
+{
+  // Joining the local AP already requires the AP password. When enabled in
+  // the Wi-Fi settings, requests that arrive through the STA interface come
+  // from a shared network and must present the same password with HTTP
+  // Digest authentication.
+  return !settings_.network().stationPortalAuthentication
+      || !requestFromStation()
+      || webServer_.authenticate(
+        AppConfig::Network::portalUser,
+        settings_.network().apPassword.c_str());
+}
+
+bool PortalApplication::authorize()
+{
+  if (authorized()) {
+    return true;
+  }
+  webServer_.requestAuthentication(
+    DIGEST_AUTH,
+    AppConfig::Network::portalRealm,
+    "Authentication required");
+  return false;
 }
 
 void PortalApplication::sendHomePage()
@@ -656,7 +719,13 @@ void PortalApplication::sendCompressedPage(
 
 void PortalApplication::sendPortalRedirect()
 {
-  const String location = String("http://") + WiFi.softAPIP().toString() + "/";
+  // Redirect to the address the client used, so the portal also opens from
+  // the STA network instead of pointing at the unreachable AP address.
+  IPAddress address = webServer_.client().localIP();
+  if (address == IPAddress(0, 0, 0, 0)) {
+    address = WiFi.softAPIP();
+  }
+  const String location = String("http://") + address.toString() + "/";
   webServer_.sendHeader("Location", location, true);
   webServer_.sendHeader("Cache-Control", "no-store");
   webServer_.send(302, "text/plain; charset=utf-8", "Portal");
@@ -689,7 +758,7 @@ void PortalApplication::sendFontPreviewData()
         0,
         FontModel::fontCount - 1,
         fontId)) {
-    sendJson(false, F("Yazi tipi kimligi gecersiz."), 400);
+    sendJson(false, UI_TEXT("Yazı tipi kimliği geçersiz."), 400);
     return;
   }
 
@@ -699,21 +768,21 @@ void PortalApplication::sendFontPreviewData()
   const uint16_t glyphCount = static_cast<uint16_t>(last - first) + 1U;
   uint32_t bitmapSize = 0;
   uint8_t generatedBitmap[FontCatalog::generatedGlyphBufferSize] = {};
+  // A glyph that cannot be produced is sent as an empty glyph, exactly as the
+  // panel skips it, instead of failing the whole preview.
   for (uint16_t index = 0; index < glyphCount; ++index) {
     FontCatalog::GlyphView glyph;
-    if (!FontCatalog::glyph(
+    if (FontCatalog::glyph(
           fontId,
           static_cast<uint8_t>(first + index),
           generatedBitmap,
           sizeof(generatedBitmap),
           glyph)) {
-      sendJson(false, F("Yazi tipi glif verisi olusturulamadi."), 500);
-      return;
+      bitmapSize += glyph.bitmapSize;
     }
-    bitmapSize += glyph.bitmapSize;
   }
   if (bitmapSize > UINT16_MAX) {
-    sendJson(false, F("Yazi tipi onizleme verisi cok buyuk."), 500);
+    sendJson(false, UI_TEXT("Yazı tipi önizleme verisi çok büyük."), 500);
     return;
   }
   const size_t responseSize = fontPreviewHeaderSize
@@ -739,12 +808,14 @@ void PortalApplication::sendFontPreviewData()
   uint16_t bitmapOffset = 0;
   for (uint16_t index = 0; index < glyphCount; ++index) {
     FontCatalog::GlyphView glyph;
-    FontCatalog::glyph(
-      fontId,
-      static_cast<uint8_t>(first + index),
-      generatedBitmap,
-      sizeof(generatedBitmap),
-      glyph);
+    if (!FontCatalog::glyph(
+          fontId,
+          static_cast<uint8_t>(first + index),
+          generatedBitmap,
+          sizeof(generatedBitmap),
+          glyph)) {
+      glyph = {};
+    }
     uint8_t *record = &glyphChunk[glyphChunkLength];
     writeLittleEndian16(record, bitmapOffset);
     record[2] = glyph.width;
@@ -767,13 +838,13 @@ void PortalApplication::sendFontPreviewData()
 
   for (uint16_t index = 0; index < glyphCount; ++index) {
     FontCatalog::GlyphView glyph;
-    FontCatalog::glyph(
-      fontId,
-      static_cast<uint8_t>(first + index),
-      generatedBitmap,
-      sizeof(generatedBitmap),
-      glyph);
-    if (glyph.bitmapSize == 0) {
+    if (!FontCatalog::glyph(
+          fontId,
+          static_cast<uint8_t>(first + index),
+          generatedBitmap,
+          sizeof(generatedBitmap),
+          glyph)
+        || glyph.bitmapSize == 0) {
       continue;
     }
     if (glyph.bitmapInProgramMemory) {
@@ -797,6 +868,18 @@ void PortalApplication::sendTemperatureJson()
 void PortalApplication::handleFirmwareUpload()
 {
   HTTPUpload &upload = webServer_.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    // Check credentials before the first byte reaches the OTA partition; the
+    // request handler that answers 401 only runs after the whole upload.
+    uploadAuthorized_ = authorized();
+    if (!uploadAuthorized_) {
+      Serial.println("OTA upload rejected: authentication required.");
+    }
+  }
+  if (!uploadAuthorized_) {
+    return;
+  }
+
   switch (upload.status) {
     case UPLOAD_FILE_START:
       firmwareUpdate_.beginUpload(upload.filename);
@@ -816,7 +899,7 @@ void PortalApplication::handleFirmwareUpload()
 void PortalApplication::finishFirmwareUploadRequest()
 {
   if (!firmwareUpdate_.uploadStarted()) {
-    sendJson(false, F("firmware.bin dosyası gönderilmedi."), 400);
+    sendJson(false, UI_TEXT("firmware.bin dosyası gönderilmedi."), 400);
     return;
   }
 
@@ -835,25 +918,35 @@ void PortalApplication::saveContentSettings()
 {
   const String payload = webServer_.arg("plain");
   if (payload.length() > maximumContentBodySize) {
-    sendJson(false, "Ekran icerigi veri sinirini asiyor.", 413);
+    sendJson(false, UI_TEXT("Ekran içeriği veri sınırını aşıyor."), 413);
     return;
   }
 
-  ContentSettings content{};
+  // ~2.7 KB; kept off the 8 KB loop task stack.
+  std::unique_ptr<ContentSettings> content(new (std::nothrow) ContentSettings());
+  if (!content) {
+    sendJson(false, UI_TEXT("Ekran tasarımı için bellek ayrılamadı."), 500);
+    return;
+  }
   String error;
-  if (!parseContentPayload(payload, content, error)
-      || !SettingsService::validateContent(content, settings_.panel(), error)) {
+  if (!parseContentPayload(payload, *content, error)
+      || !SettingsService::validateContent(*content, settings_.panel(), error)) {
     sendJson(false, error, 400);
     return;
   }
-  if (!settings_.saveContent(content)) {
-    sendJson(false, "Ekran tasarimi flash bellege kaydedilemedi.", 500);
+  if (!temperature_.humiditySupported()
+      && SettingsService::contentUsesHumidity(*content)) {
+    sendJson(false, UI_TEXT("Seçili sensör (TMP112) nem ölçmez; nem gösteren kutuları kaldırın veya veri türünü değiştirin."), 400);
+    return;
+  }
+  if (!settings_.saveContent(*content)) {
+    sendJson(false, UI_TEXT("Ekran tasarımı flash belleğe kaydedilemedi."), 500);
     return;
   }
 
   valueBoxes_.reload();
   content_.reload();
-  sendJson(true, "Ekran tasarimi panele uygulandi ve kaydedildi.");
+  sendJson(true, UI_TEXT("Ekran tasarımı panele uygulandı ve kaydedildi."));
 }
 
 void PortalApplication::savePanelSettings()
@@ -876,7 +969,7 @@ void PortalApplication::savePanelSettings()
       || !parseUnsignedByte(columns, 1, AppConfig::maxPanelColumns, panel.columns)
       || !parseUnsignedByte(brightness, 0, 255, panel.brightness)
       || !parseUnsignedByte(connectionStyleText, 1, 8, connectionStyle)) {
-    sendJson(false, "Eksik veya gecersiz panel ayari.", 400);
+    sendJson(false, UI_TEXT("Eksik veya geçersiz panel ayarı."), 400);
     return;
   }
   panel.connectionStyle = static_cast<PanelConnectionStyle>(connectionStyle);
@@ -886,12 +979,35 @@ void PortalApplication::savePanelSettings()
     sendJson(false, error, 400);
     return;
   }
+
+  const PanelSettings current = settings_.panel();
+  const bool layoutChanged = panel.scanDivisor != current.scanDivisor
+    || panel.rows != current.rows
+    || panel.columns != current.columns
+    || panel.connectionStyle != current.connectionStyle;
+  // Checked before saving: content is validated against the stored layout.
+  const bool contentFits = !layoutChanged
+    || SettingsService::validateContent(settings_.content(), panel, error);
   if (!settings_.savePanel(panel)) {
-    sendJson(false, "Panel ayarlari flash bellege kaydedilemedi.", 500);
+    sendJson(false, UI_TEXT("Panel ayarları flash belleğe kaydedilemedi."), 500);
     return;
   }
 
-  sendJson(true, "Panel ayarlari kaydedildi. Cihaz yeniden baslatilacak.");
+  if (!layoutChanged) {
+    // Brightness is applied live; the sleep schedule and a running color
+    // test pick up the stored value when they finish.
+    if (!panelSleep_.sleeping() && !colorTestActive_) {
+      panel_.setBrightness(panel.brightness);
+    }
+    sendJson(true, UI_TEXT("Parlaklık kaydedildi ve panele uygulandı."));
+    return;
+  }
+
+  sendJson(
+    true,
+    contentFits
+      ? UI_TEXT("Panel ayarları kaydedildi. Cihaz yeniden başlatılacak.")
+      : UI_TEXT("Panel ayarları kaydedildi. Mevcut ekran tasarımı yeni yerleşime sığmadığı için yeniden başlatmada varsayılan tasarım yüklenecek."));
   scheduleRestart();
 }
 
@@ -899,21 +1015,39 @@ void PortalApplication::saveClockSettings()
 {
   String date;
   String time;
+  ClockDateTime dateTime{};
+  if (!postValue("date", date)
+      || !postValue("time", time)
+      || !parseDateTime(date, time, dateTime)) {
+    sendJson(false, UI_TEXT("Tarih veya saat geçersiz."), 400);
+    return;
+  }
+  if (!clock_.ready()) {
+    sendJson(false, UI_TEXT("RTC bulunamadı; saat ve tarih ayarlanamadı."), 503);
+    return;
+  }
+  if (!clock_.setDateTime(dateTime)) {
+    sendJson(false, UI_TEXT("Saat ve tarih RTC'ye yazılamadı."), 500);
+    return;
+  }
+
+  content_.refresh();
+  sendJson(true, UI_TEXT("Saat ve tarih kaydedildi."));
+}
+
+void PortalApplication::saveSleepSettings()
+{
   String sleepEnabled;
   String sleepStart;
   String sleepEnd;
   String sleepDayModeText;
-  ClockDateTime dateTime{};
   PanelSleepSettings sleep{};
   uint8_t enabled = 0;
   uint8_t sleepDayMode = 0;
-  if (!postValue("date", date)
-      || !postValue("time", time)
-      || !postValue("sleepEnabled", sleepEnabled)
+  if (!postValue("sleepEnabled", sleepEnabled)
       || !postValue("sleepStart", sleepStart)
       || !postValue("sleepEnd", sleepEnd)
       || !postValue("sleepDayMode", sleepDayModeText)
-      || !parseDateTime(date, time, dateTime)
       || !parseUnsignedByte(sleepEnabled, 0, 1, enabled)
       || !parseMinuteOfDay(sleepStart, sleep.startMinuteOfDay)
       || !parseMinuteOfDay(sleepEnd, sleep.endMinuteOfDay)
@@ -922,7 +1056,7 @@ void PortalApplication::saveClockSettings()
         static_cast<uint8_t>(ScheduleDayMode::everyDay),
         static_cast<uint8_t>(ScheduleDayMode::weekdays),
         sleepDayMode)) {
-    sendJson(false, "Tarih, saat veya uyku ayari gecersiz.", 400);
+    sendJson(false, UI_TEXT("Uyku ayarı geçersiz."), 400);
     return;
   }
   sleep.enabled = enabled != 0;
@@ -933,17 +1067,132 @@ void PortalApplication::saveClockSettings()
     sendJson(false, validationError, 400);
     return;
   }
-  if (!clock_.setDateTime(dateTime)) {
-    sendJson(false, "Saat ve tarih RTC'ye yazilamadi.", 500);
-    return;
-  }
   if (!settings_.saveSleep(sleep)) {
-    sendJson(false, "Uyku ayarlari flash bellege kaydedilemedi.", 500);
+    sendJson(false, UI_TEXT("Uyku ayarları flash belleğe kaydedilemedi."), 500);
     return;
   }
 
+  sendJson(true, UI_TEXT("Panel uyku ayarları kaydedildi."));
+}
+
+void PortalApplication::saveTimeSyncSettings()
+{
+  String enabledText;
+  TimeSyncSettings timeSync;
+  uint8_t enabled = 0;
+  if (!postValue("ntpEnabled", enabledText)
+      || !postValue("ntpServer", timeSync.ntpServer)
+      || !postValue("timeZone", timeSync.timeZone)
+      || !parseUnsignedByte(enabledText, 0, 1, enabled)) {
+    sendJson(false, UI_TEXT("Eksik veya geçersiz NTP ayarı."), 400);
+    return;
+  }
+  timeSync.ntpEnabled = enabled != 0;
+  timeSync.ntpServer.trim();
+  timeSync.timeZone.trim();
+
+  String validationError;
+  if (!SettingsService::validateTimeSync(timeSync, validationError)) {
+    sendJson(false, validationError, 400);
+    return;
+  }
+  if (!settings_.saveTimeSync(timeSync)) {
+    sendJson(false, UI_TEXT("NTP ayarları flash belleğe kaydedilemedi."), 500);
+    return;
+  }
+
+  timeSync_.reload();
+  sendJson(true, UI_TEXT("NTP ayarları kaydedildi."));
+}
+
+void PortalApplication::saveTemperatureSensorSettings()
+{
+  String typeText;
+  String intervalText;
+  String temperatureOffsetText;
+  String humidityOffsetText;
+  String sht40AddressText;
+  String sht40PrecisionText;
+  String tmp112AddressText;
+  String tmp112RateText;
+  String tmp112ExtendedText;
+  String hdc2022AddressText;
+  String hdc2022TemperatureResolutionText;
+  String hdc2022HumidityResolutionText;
+  TemperatureSensorSettings sensor;
+  uint8_t type = 0;
+  int32_t temperatureOffset = 0;
+  int32_t humidityOffset = 0;
+  uint8_t sht40Precision = 0;
+  uint8_t tmp112Rate = 0;
+  uint8_t tmp112Extended = 0;
+  uint8_t hdc2022TemperatureResolution = 0;
+  uint8_t hdc2022HumidityResolution = 0;
+  if (!postValue("type", typeText)
+      || !postValue("interval", intervalText)
+      || !postValue("temperatureOffset", temperatureOffsetText)
+      || !postValue("humidityOffset", humidityOffsetText)
+      || !postValue("sht40Address", sht40AddressText)
+      || !postValue("sht40Precision", sht40PrecisionText)
+      || !postValue("tmp112Address", tmp112AddressText)
+      || !postValue("tmp112ConversionRate", tmp112RateText)
+      || !postValue("tmp112ExtendedMode", tmp112ExtendedText)
+      || !postValue("hdc2022Address", hdc2022AddressText)
+      || !postValue("hdc2022TemperatureResolution", hdc2022TemperatureResolutionText)
+      || !postValue("hdc2022HumidityResolution", hdc2022HumidityResolutionText)
+      || !parseUnsignedByte(typeText, 0, 2, type)
+      || !parseUnsigned16(
+        intervalText,
+        minimumSensorIntervalSeconds,
+        maximumSensorIntervalSeconds,
+        sensor.measurementIntervalSeconds)
+      || !parseSigned32(temperatureOffsetText, temperatureOffset)
+      || temperatureOffset < -maximumTemperatureOffsetTenths
+      || temperatureOffset > maximumTemperatureOffsetTenths
+      || !parseSigned32(humidityOffsetText, humidityOffset)
+      || humidityOffset < -maximumHumidityOffsetTenths
+      || humidityOffset > maximumHumidityOffsetTenths
+      || !parseUnsignedByte(sht40AddressText, 0, 0x7F, sensor.sht40Address)
+      || !parseUnsignedByte(sht40PrecisionText, 0, 2, sht40Precision)
+      || !parseUnsignedByte(tmp112AddressText, 0, 0x7F, sensor.tmp112Address)
+      || !parseUnsignedByte(tmp112RateText, 0, 3, tmp112Rate)
+      || !parseUnsignedByte(tmp112ExtendedText, 0, 1, tmp112Extended)
+      || !parseUnsignedByte(hdc2022AddressText, 0, 0x7F, sensor.hdc2022Address)
+      || !parseUnsignedByte(hdc2022TemperatureResolutionText, 0, 2, hdc2022TemperatureResolution)
+      || !parseUnsignedByte(hdc2022HumidityResolutionText, 0, 2, hdc2022HumidityResolution)) {
+    sendJson(false, UI_TEXT("Eksik veya geçersiz sensör ayarı."), 400);
+    return;
+  }
+  sensor.type = static_cast<TemperatureSensorType>(type);
+  sensor.temperatureOffsetTenths = static_cast<int16_t>(temperatureOffset);
+  sensor.humidityOffsetTenths = static_cast<int16_t>(humidityOffset);
+  sensor.sht40Precision = static_cast<Sht40Precision>(sht40Precision);
+  sensor.tmp112ConversionRate = static_cast<Tmp112ConversionRate>(tmp112Rate);
+  sensor.tmp112ExtendedMode = tmp112Extended != 0;
+  sensor.hdc2022TemperatureResolution =
+    static_cast<Hdc2022Resolution>(hdc2022TemperatureResolution);
+  sensor.hdc2022HumidityResolution =
+    static_cast<Hdc2022Resolution>(hdc2022HumidityResolution);
+
+  String validationError;
+  if (!SettingsService::validateTemperatureSensor(sensor, validationError)) {
+    sendJson(false, validationError, 400);
+    return;
+  }
+  // A design that shows humidity must not end up on a sensor without it.
+  if (!temperatureSensorHasHumidity(sensor.type)
+      && SettingsService::contentUsesHumidity(settings_.content())) {
+    sendJson(false, UI_TEXT("Ekran tasarımında nem gösteren kutular var. TMP112 nem ölçmediği için önce bu kutuları kaldırın veya veri türünü değiştirin."), 409);
+    return;
+  }
+  if (!settings_.saveTemperatureSensor(sensor)) {
+    sendJson(false, UI_TEXT("Sensör ayarları flash belleğe kaydedilemedi."), 500);
+    return;
+  }
+
+  temperature_.reload();
   content_.refresh();
-  sendJson(true, "Saat, tarih ve panel uyku ayarlari kaydedildi.");
+  sendJson(true, UI_TEXT("Sıcaklık sensörü ayarları kaydedildi ve uygulandı."));
 }
 
 void PortalApplication::saveAlarmSettings()
@@ -958,7 +1207,7 @@ void PortalApplication::saveAlarmSettings()
         0,
         maximumAlarmCount,
         alarms.count)) {
-    sendJson(false, "Alarm sayisi gecersiz.", 400);
+    sendJson(false, UI_TEXT("Alarm sayısı geçersiz."), 400);
     return;
   }
 
@@ -994,7 +1243,7 @@ void PortalApplication::saveAlarmSettings()
           static_cast<uint8_t>(ScheduleDayMode::everyDay),
           static_cast<uint8_t>(ScheduleDayMode::customDays),
           dayMode)) {
-      sendJson(false, "Eksik veya gecersiz alarm ayari.", 400);
+      sendJson(false, UI_TEXT("Eksik veya geçersiz alarm ayarı."), 400);
       return;
     }
 
@@ -1007,7 +1256,7 @@ void PortalApplication::saveAlarmSettings()
             1,
             alarmAllDaysMask,
             dayMask)) {
-        sendJson(false, "Alarm icin en az bir gecerli gun secilmelidir.", 400);
+        sendJson(false, UI_TEXT("Alarm için en az bir geçerli gün seçilmelidir."), 400);
         return;
       }
     } else {
@@ -1028,11 +1277,11 @@ void PortalApplication::saveAlarmSettings()
     return;
   }
   if (!settings_.saveAlarms(alarms)) {
-    sendJson(false, "Alarm ayarlari flash bellege kaydedilemedi.", 500);
+    sendJson(false, UI_TEXT("Alarm ayarları flash belleğe kaydedilemedi."), 500);
     return;
   }
 
-  sendJson(true, "Alarm ayarlari kaydedildi.");
+  sendJson(true, UI_TEXT("Alarm ayarları kaydedildi."));
 }
 
 void PortalApplication::saveNetworkSettings()
@@ -1042,9 +1291,24 @@ void PortalApplication::saveNetworkSettings()
       || !postValue("apPassword", network.apPassword)
       || !postValue("staSsid", network.staSsid)
       || !postValue("staPassword", network.staPassword)) {
-    sendJson(false, "Eksik Wi-Fi ayari.", 400);
+    sendJson(false, UI_TEXT("Eksik Wi-Fi ayarı."), 400);
     return;
   }
+
+  // Stored passwords are never sent to the browser. An empty field with its
+  // keep flag set means "leave the stored password unchanged".
+  const NetworkSettings &current = settings_.network();
+  String keep;
+  if (postValue("apPasswordKeep", keep) && keep == "1") {
+    network.apPassword = current.apPassword;
+  }
+  if (postValue("staPasswordKeep", keep) && keep == "1") {
+    network.staPassword = current.staPassword;
+  }
+  String authentication;
+  network.stationPortalAuthentication = postValue("staAuthentication", authentication)
+    ? authentication == "1"
+    : current.stationPortalAuthentication;
 
   String error;
   if (!SettingsService::validateNetwork(network, error)) {
@@ -1052,11 +1316,11 @@ void PortalApplication::saveNetworkSettings()
     return;
   }
   if (!settings_.saveNetwork(network)) {
-    sendJson(false, "Wi-Fi ayarlari flash bellege kaydedilemedi.", 500);
+    sendJson(false, UI_TEXT("Wi-Fi ayarları flash belleğe kaydedilemedi."), 500);
     return;
   }
 
-  sendJson(true, "Wi-Fi ayarlari kaydedildi. Cihaz yeniden baslatilacak.");
+  sendJson(true, UI_TEXT("Wi-Fi ayarları kaydedildi. Cihaz yeniden başlatılacak."));
   scheduleRestart();
 }
 
@@ -1095,7 +1359,7 @@ void PortalApplication::saveCommunicationSettings()
         static_cast<uint8_t>(UartHandshake::none),
         static_cast<uint8_t>(UartHandshake::rs485Direction),
         handshake)) {
-    sendJson(false, "Eksik veya gecersiz haberlesme ayari.", 400);
+    sendJson(false, UI_TEXT("Eksik veya geçersiz haberleşme ayarı."), 400);
     return;
   }
 
@@ -1113,25 +1377,25 @@ void PortalApplication::saveCommunicationSettings()
   if (!settings_.saveCommunication(communication)) {
     sendJson(
       false,
-      "Haberlesme ayarlari flash bellege kaydedilemedi.",
+      UI_TEXT("Haberleşme ayarları flash belleğe kaydedilemedi."),
       500);
     return;
   }
 
   sendJson(
     true,
-    "Haberlesme ayarlari kaydedildi. Cihaz yeniden baslatilacak.");
+    UI_TEXT("Haberleşme ayarları kaydedildi. Cihaz yeniden başlatılacak."));
   scheduleRestart();
 }
 
 void PortalApplication::startPanelColorTest()
 {
   if (!webServer_.hasArg("color")) {
-    sendJson(false, "Test rengi eksik.", 400);
+    sendJson(false, UI_TEXT("Test rengi eksik."), 400);
     return;
   }
   if (!panel_.ready()) {
-    sendJson(false, "Panel kullanilabilir degil.", 503);
+    sendJson(false, UI_TEXT("Panel kullanılabilir değil."), 503);
     return;
   }
 
@@ -1146,7 +1410,7 @@ void PortalApplication::startPanelColorTest()
   } else if (color == "blue") {
     blue = 255;
   } else {
-    sendJson(false, "Gecersiz test rengi.", 400);
+    sendJson(false, UI_TEXT("Geçersiz test rengi."), 400);
     return;
   }
 
@@ -1159,22 +1423,24 @@ void PortalApplication::startPanelColorTest()
   panel_.showSolidColor(red, green, blue);
   colorTestActive_ = true;
   colorTestStartedAt_ = millis();
-  sendJson(true, "Renk testi baslatildi.");
+  sendJson(true, UI_TEXT("Renk testi başlatıldı."));
 }
 
-String PortalApplication::buildSettingsJson() const
+String PortalApplication::buildSettingsJson()
 {
-  const PanelSettings panel = settings_.panel();
-  const NetworkSettings network = settings_.network();
-  const CommunicationSettings communication = settings_.communication();
-  const PanelSleepSettings sleep = settings_.sleep();
-  const AlarmSettings alarms = settings_.alarms();
+  const PanelSettings &panel = settings_.panel();
+  const NetworkSettings &network = settings_.network();
+  const CommunicationSettings &communication = settings_.communication();
+  const PanelSleepSettings &sleep = settings_.sleep();
+  const TimeSyncSettings &timeSync = settings_.timeSync();
+  const AlarmSettings &alarms = settings_.alarms();
   const ClockDateTime clock = clock_.dateTime();
 
-  char date[11] = "";
-  char time[9] = "";
-  char sleepStart[6] = "";
-  char sleepEnd[6] = "";
+  // Sized for any uint8_t/uint16_t value so snprintf can never truncate.
+  char date[16] = "";
+  char time[16] = "";
+  char sleepStart[12] = "";
+  char sleepEnd[12] = "";
   if (clock_.ready()) {
     snprintf(date, sizeof(date), "%04u-%02u-%02u", clock.year, clock.month, clock.day);
     snprintf(time, sizeof(time), "%02u:%02u:%02u", clock.hour, clock.minute, clock.second);
@@ -1194,9 +1460,11 @@ String PortalApplication::buildSettingsJson() const
     sleep.endMinuteOfDay % 60);
 
   String json;
-  json.reserve(768 + alarms.count * 80);
+  json.reserve(1024 + alarms.count * 80);
   json += F("{\"firmware\":\"");
   json += escapeJson(AppConfig::firmwareVersion);
+  json += F("\",\"access\":\"");
+  json += requestFromStation() ? F("sta") : F("ap");
   json += F("\",\"panel\":{\"scan\":");
   json += panel.scanDivisor;
   json += F(",\"rows\":");
@@ -1225,14 +1493,53 @@ String PortalApplication::buildSettingsJson() const
   json += date;
   json += F("\",\"time\":\"");
   json += time;
-  json += F("\",\"sleepEnabled\":");
+  json += F("\"},\"sleep\":{\"enabled\":");
   json += sleep.enabled ? F("true") : F("false");
-  json += F(",\"sleepStart\":\"");
+  json += F(",\"start\":\"");
   json += sleepStart;
-  json += F("\",\"sleepEnd\":\"");
+  json += F("\",\"end\":\"");
   json += sleepEnd;
-  json += F("\",\"sleepDayMode\":");
+  json += F("\",\"dayMode\":");
   json += static_cast<uint8_t>(sleep.dayMode);
+  json += F("},\"timeSync\":{\"enabled\":");
+  json += timeSync.ntpEnabled ? F("true") : F("false");
+  json += F(",\"server\":\"");
+  json += escapeJson(timeSync.ntpServer);
+  json += F("\",\"timeZone\":\"");
+  json += escapeJson(timeSync.timeZone);
+  json += F("\",\"synchronized\":");
+  json += timeSync_.synchronized() ? F("true") : F("false");
+  json += F(",\"secondsSinceSync\":");
+  json += timeSync_.secondsSinceSync();
+  json += F(",\"stationConnected\":");
+  json += wifi_.stationHasIpAddress() ? F("true") : F("false");
+  const TemperatureSensorSettings &sensor = settings_.temperatureSensor();
+  json += F("},\"temperatureSensor\":{\"type\":");
+  json += static_cast<uint8_t>(sensor.type);
+  json += F(",\"interval\":");
+  json += sensor.measurementIntervalSeconds;
+  json += F(",\"temperatureOffset\":");
+  json += sensor.temperatureOffsetTenths;
+  json += F(",\"humidityOffset\":");
+  json += sensor.humidityOffsetTenths;
+  json += F(",\"sht40Address\":");
+  json += sensor.sht40Address;
+  json += F(",\"sht40Precision\":");
+  json += static_cast<uint8_t>(sensor.sht40Precision);
+  json += F(",\"tmp112Address\":");
+  json += sensor.tmp112Address;
+  json += F(",\"tmp112ConversionRate\":");
+  json += static_cast<uint8_t>(sensor.tmp112ConversionRate);
+  json += F(",\"tmp112ExtendedMode\":");
+  json += sensor.tmp112ExtendedMode ? F("true") : F("false");
+  json += F(",\"hdc2022Address\":");
+  json += sensor.hdc2022Address;
+  json += F(",\"hdc2022TemperatureResolution\":");
+  json += static_cast<uint8_t>(sensor.hdc2022TemperatureResolution);
+  json += F(",\"hdc2022HumidityResolution\":");
+  json += static_cast<uint8_t>(sensor.hdc2022HumidityResolution);
+  json += F(",\"contentUsesHumidity\":");
+  json += SettingsService::contentUsesHumidity(settings_.content()) ? F("true") : F("false");
   json += F("},\"alarms\":{\"maximum\":");
   json += maximumAlarmCount;
   json += F(",\"items\":[");
@@ -1253,21 +1560,24 @@ String PortalApplication::buildSettingsJson() const
     json += alarm.customDayMask;
     json += '}';
   }
+  // Passwords are write-only: the portal only learns whether one is set.
   json += F("]},\"wifi\":{\"apSsid\":\"");
   json += escapeJson(network.apSsid);
-  json += F("\",\"apPassword\":\"");
-  json += escapeJson(network.apPassword);
-  json += F("\",\"staSsid\":\"");
+  json += F("\",\"apPasswordDefault\":");
+  json += settings_.usesDefaultApPassword() ? F("true") : F("false");
+  json += F(",\"staSsid\":\"");
   json += escapeJson(network.staSsid);
-  json += F("\",\"staPassword\":\"");
-  json += escapeJson(network.staPassword);
-  json += F("\"}}");
+  json += F("\",\"staPasswordSet\":");
+  json += network.staPassword.isEmpty() ? F("false") : F("true");
+  json += F(",\"staAuthentication\":");
+  json += network.stationPortalAuthentication ? F("true") : F("false");
+  json += F("}}");
   return json;
 }
 
 String PortalApplication::buildWifiStatusJson() const
 {
-  const NetworkSettings network = settings_.network();
+  const NetworkSettings &network = settings_.network();
   const bool connected = wifi_.stationHasIpAddress();
   String json;
   json.reserve(240);
@@ -1295,11 +1605,11 @@ String PortalApplication::buildWifiStatusJson() const
 
 String PortalApplication::buildContentJson() const
 {
-  const PanelSettings panel = settings_.panel();
-  const ContentSettings content = settings_.content();
+  const PanelSettings &panel = settings_.panel();
+  const ContentSettings &content = settings_.content();
 
   String json;
-  json.reserve(1536 + content.count * 240);
+  json.reserve(1536 + content.count * 280);
   json += F("{\"ok\":true,\"panel\":{\"rows\":");
   json += panel.rows;
   json += F(",\"columns\":");
@@ -1310,7 +1620,9 @@ String PortalApplication::buildContentJson() const
   json += AppConfig::panelHeight;
   json += F(",\"maxPerPanel\":");
   json += maxBoxesPerPanel;
-  json += F("},\"defaultFont\":");
+  json += F("},");
+  appendSensorJson(json);
+  json += F(",\"defaultFont\":");
   json += FontModel::defaultFontId;
   json += F(",\"fonts\":[");
   for (uint8_t fontId = 0; fontId < FontModel::fontCount; ++fontId) {
@@ -1362,6 +1674,10 @@ String PortalApplication::buildContentJson() const
     json += item.cycleIntervalSeconds;
     json += F(",\"temperatureFormat\":");
     json += static_cast<uint8_t>(item.temperatureDisplayFormat);
+    json += F(",\"scrollArea\":");
+    json += static_cast<uint8_t>(item.scrollArea);
+    json += F(",\"decimals\":");
+    json += item.valueDecimals;
     json += F(",\"text\":\"");
     json += escapeJson(item.text);
     json += F("\",\"valueSource\":");
@@ -1379,11 +1695,18 @@ String PortalApplication::buildContentJson() const
     } else {
       json += item.initialIntegerValue;
     }
-    char currentValue[32] = {};
+    char currentValue[48] = {};
     valueBoxes_.formatValue(index, currentValue, sizeof(currentValue));
     json += F(",\"currentValue\":\"");
     json += escapeJson(currentValue);
-    json += F("\"}");
+    json += F("\",\"currentRaw\":");
+    double currentNumber = 0.0;
+    if (valueBoxes_.currentNumber(index, currentNumber)) {
+      json += String(currentNumber, 6);
+    } else {
+      json += F("null");
+    }
+    json += '}';
   }
   json += F("]}");
   return json;
@@ -1392,8 +1715,10 @@ String PortalApplication::buildContentJson() const
 String PortalApplication::buildTemperatureJson() const
 {
   String json;
-  json.reserve(96);
-  json += F("{\"ok\":true,\"found\":");
+  json.reserve(256);
+  json += F("{\"ok\":true,");
+  appendSensorJson(json);
+  json += F(",\"found\":");
   json += temperature_.sensorFound() ? F("true") : F("false");
   json += F(",\"ready\":");
   json += temperature_.ready() ? F("true") : F("false");
@@ -1403,8 +1728,29 @@ String PortalApplication::buildTemperatureJson() const
   } else {
     json += F("null");
   }
+  json += F(",\"humidity\":");
+  if (temperature_.ready() && temperature_.humiditySupported()) {
+    json += String(temperature_.relativeHumidity(), 1);
+  } else {
+    json += F("null");
+  }
   json += '}';
   return json;
+}
+
+void PortalApplication::appendSensorJson(String &json) const
+{
+  json += F("\"sensor\":{\"type\":");
+  json += static_cast<uint8_t>(temperature_.sensorType());
+  json += F(",\"name\":\"");
+  json += temperature_.sensorName();
+  json += F("\",\"address\":");
+  json += temperature_.sensorAddress();
+  json += F(",\"humidity\":");
+  json += temperature_.humiditySupported() ? F("true") : F("false");
+  json += F(",\"missingText\":\"");
+  json += temperature_.missingText();
+  json += F("\"}");
 }
 
 void PortalApplication::sendJson(
