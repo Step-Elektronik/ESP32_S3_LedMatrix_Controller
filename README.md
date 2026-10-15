@@ -8,7 +8,7 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 
 | Özellik | Değer |
 |---|---|
-| Firmware sürümü | `0.9.1` |
+| Firmware sürümü | `0.10.0` |
 | Mikrodenetleyici hedefi | ESP32-S3 |
 | PlatformIO kartı | `esp32-s3-devkitc1-n8r2` |
 | Önerilen modül | ESP32-S3-WROOM-1-N8R2 |
