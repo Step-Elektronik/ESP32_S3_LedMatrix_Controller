@@ -100,6 +100,9 @@ private:
   Job job_ = Job::check;
 
   bool automaticCheck_ = true;
+  // Installed by an online update and not yet confirmed by BootGuardService.
+  String confirmingVersion_;
+  uint32_t lastConfirmationCheckAt_ = 0;
   uint32_t connectedSince_ = 0;
   bool restartScheduled_ = false;
   uint32_t restartAt_ = 0;

@@ -20,6 +20,7 @@ private:
   uint32_t bootStartedAt_ = 0;
   bool ready_ = false;
   bool counterCleared_ = false;
+  bool firmwareConfirmed_ = false;
   bool factoryResetRequired_ = false;
 };
 

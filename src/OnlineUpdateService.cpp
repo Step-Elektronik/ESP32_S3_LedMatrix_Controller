@@ -21,6 +21,7 @@ constexpr char automaticKey[] = "auto";
 constexpr size_t maximumManifestSize = 2048;
 constexpr size_t maximumNotesLength = 200;
 constexpr uint32_t restartDelayMs = 1500;
+constexpr uint32_t confirmationCheckIntervalMs = 5000;
 constexpr uint32_t taskStackSize = 10240;
 constexpr int maximumRedirects = 3;
 constexpr char userAgent[] = "STEP-RGB/" FIRMWARE_VERSION;
@@ -216,26 +217,49 @@ void OnlineUpdateService::begin()
 
   automaticCheck_ = preferences_.getBool(automaticKey, true);
   const String pending = preferences_.getString(pendingKey, "");
-  if (!pending.isEmpty()) {
-    if (pending == AppConfig::firmwareVersion) {
-      Serial.printf("Online update to %s started successfully.\n", pending.c_str());
-    } else {
-      // The new firmware reset before it was confirmed, so the bootloader
-      // returned to this one.
-      std::lock_guard<std::mutex> lock(mutex_);
-      rolledBackVersion_ = pending;
-      Serial.printf(
-        "Firmware %s did not start; running %s again.\n",
-        pending.c_str(),
-        AppConfig::firmwareVersion);
-    }
-    preferences_.remove(pendingKey);
+  if (pending.isEmpty()) {
+    return;
   }
+  if (pending == AppConfig::firmwareVersion) {
+    // Kept until BootGuardService confirms this firmware, so that a reset
+    // before that point is still reported by the previous firmware.
+    confirmingVersion_ = pending;
+    Serial.printf("Online update to %s started; waiting for confirmation.\n", pending.c_str());
+    return;
+  }
+
+  // The new firmware reset before it was confirmed, so the bootloader
+  // returned to this one.
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    rolledBackVersion_ = pending;
+  }
+  Serial.printf(
+    "Firmware %s was not confirmed; running %s again.\n",
+    pending.c_str(),
+    AppConfig::firmwareVersion);
+  preferences_.remove(pendingKey);
 }
 
 void OnlineUpdateService::update()
 {
   const uint32_t now = millis();
+  if (!confirmingVersion_.isEmpty()
+      && now - lastConfirmationCheckAt_ >= confirmationCheckIntervalMs) {
+    lastConfirmationCheckAt_ = now;
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+    if (running != nullptr
+        && esp_ota_get_state_partition(running, &state) == ESP_OK
+        && state != ESP_OTA_IMG_PENDING_VERIFY) {
+      Serial.printf("Online update to %s confirmed.\n", confirmingVersion_.c_str());
+      if (storageReady_) {
+        preferences_.remove(pendingKey);
+      }
+      confirmingVersion_ = "";
+    }
+  }
+
   if (installFinished_.load()) {
     if (!restartScheduled_) {
       String version;

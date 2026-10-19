@@ -33,6 +33,7 @@ bool previousBootFailed(esp_reset_reason_t reason)
 
 bool BootGuardService::begin()
 {
+  bootStartedAt_ = millis();
   if (!preferences_.begin(preferencesNamespace, false)) {
     Serial.println("ERROR: Boot guard storage could not be opened.");
     return false;
@@ -53,7 +54,6 @@ bool BootGuardService::begin()
     return false;
   }
 
-  bootStartedAt_ = millis();
   ready_ = true;
   counterCleared_ = failureCount == 0;
   Serial.printf(
@@ -72,15 +72,20 @@ bool BootGuardService::begin()
 
 void BootGuardService::update()
 {
-  if (!ready_ || counterCleared_) {
+  if (firmwareConfirmed_ && (!ready_ || counterCleared_)) {
+    return;
+  }
+  if (millis() - bootStartedAt_ < AppConfig::bootStableDurationMs) {
     return;
   }
 
-  if (millis() - bootStartedAt_ >= AppConfig::bootStableDurationMs) {
+  // Independent of the failure counter: a planned restart into new firmware
+  // leaves the counter clear, yet that firmware still has to be confirmed.
+  if (!firmwareConfirmed_) {
     confirmRunningFirmware();
-    if (resetCounter()) {
-      Serial.println("Boot guard counter cleared after 60 seconds of stable operation.");
-    }
+  }
+  if (ready_ && !counterCleared_ && resetCounter()) {
+    Serial.println("Boot guard counter cleared after 60 seconds of stable operation.");
   }
 }
 
@@ -97,13 +102,18 @@ void BootGuardService::confirmRunningFirmware()
 {
   // After an OTA update the new firmware starts as "pending verify"; if it
   // resets before this call, the bootloader starts the previous firmware.
+  firmwareConfirmed_ = true;
   const esp_partition_t *running = esp_ota_get_running_partition();
   esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
-  if (running != nullptr
-      && esp_ota_get_state_partition(running, &state) == ESP_OK
-      && state == ESP_OTA_IMG_PENDING_VERIFY
-      && esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+  if (running == nullptr
+      || esp_ota_get_state_partition(running, &state) != ESP_OK
+      || state != ESP_OTA_IMG_PENDING_VERIFY) {
+    return;
+  }
+  if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
     Serial.println("New firmware confirmed; rollback cancelled.");
+  } else {
+    Serial.println("ERROR: New firmware could not be confirmed.");
   }
 }
 
