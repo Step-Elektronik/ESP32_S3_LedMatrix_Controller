@@ -1807,7 +1807,6 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
           Güncellemeleri otomatik denetle (günde bir kez)
         </label>
         <p class="sleep-hint">Cihaz STA ağı üzerinden internete bağlıyken GitHub üzerinde yayınlanan son firmware'i denetler. Yeni sürüm yalnızca siz onayladığınızda indirilip kurulur. Yeni firmware ilk 60 saniye içinde kapanır veya yeniden başlarsa cihaz önceki sürüme döner.</p>
-        <p class="sleep-hint">Kaynak: <code id="online-update-repository">—</code></p>
         <div class="actions">
           <button class="button secondary" id="online-update-check" type="button">Şimdi Denetle</button>
           <button class="button" id="online-update-install" type="button" hidden>Güncelle</button>
@@ -2893,7 +2892,6 @@ R"HTML(</footer>
       byId('online-update-detail').textContent = detail;
       byId('online-update-version').hidden = false;
       byId('online-update-version').textContent = 'v' + data.current;
-      byId('online-update-repository').textContent = data.repository + ' (master)';
 
       const rollback = byId('online-update-rollback');
       rollback.hidden = !data.rolledBack;
