@@ -1,14 +1,14 @@
 # ESP32-S3 RGB LED Matrix Controller
 
-ESP32-S3 tabanlı, 32×16 HUB75/P10 RGB LED paneller için web arayüzlü kontrol cihazı firmware'idir. Proje; metin, saat, tarih, sıcaklık, nem ve dışarıdan alınan sayısal değerleri bir veya daha fazla panel üzerinde konumlandırabilir. İçerik ayarları sürükle-bırak web editörüyle hazırlanır ve ESP32-S3'ün kalıcı belleğinde saklanır.
+ESP32-S3 tabanlı, 32×16 HUB75/P10 RGB LED paneller için web arayüzlü kontrol cihazı firmware'idir. Proje; metin, saat, tarih, sıcaklık, nem, geri sayım ve dışarıdan alınan sayısal değerleri bir veya daha fazla panel üzerinde konumlandırabilir. İçerik ayarları sürükle-bırak web editörüyle hazırlanır ve ESP32-S3'ün kalıcı belleğinde saklanır.
 
-Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek zaman saati, seçilebilir sıcaklık/nem sensörü (TMP112, SHT40, HDC2022), programlanabilir alarm rölesi, panel uyku zamanlaması, Wi-Fi erişim noktası ve OTA güncelleme özelliklerini içerir.
+Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek zaman saati, seçilebilir sıcaklık/nem sensörü (TMP112, SHT40, HDC2022), programlanabilir alarm rölesi ve okul zili (okul saati), panel uyku zamanlaması, Wi-Fi erişim noktası ve OTA güncelleme özelliklerini içerir.
 
 ## Proje durumu
 
 | Özellik | Değer |
 |---|---|
-| Firmware sürümü | `0.10.0` |
+| Firmware sürümü | `0.13.0` |
 | Mikrodenetleyici hedefi | ESP32-S3 |
 | PlatformIO kartı | `esp32-s3-devkitc1-n8r2` |
 | Önerilen modül | ESP32-S3-WROOM-1-N8R2 |
@@ -43,9 +43,12 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 - ValueBox için ondalık basamak/ondalık nokta kaydırma ve birim son eki
 - GPIO12 yükselen kenar sayacı; ana döngüden bağımsız 1 ms örnekleme
 - En fazla 10 programlanabilir alarm
+- Okul saati: 20 derse kadar ders ve teneffüs zilleri, öğrenci zili, Türkiye resmi tatilleri (yarım gün arifeler dahil), tatil dönemleri ve 10 Kasım saygı duruşu zili
+- Geri sayım (örneğin sınav, toplantı veya yarışma süresi): saat/dakika/saniye süresi, web üzerinden Başlat/Durdur/Sıfırla, süre bitince ayarlanabilir süreyle alarm rölesi; elektrik kesintisinde DS3231 ile kaldığı yerden devam
 - Zamanlanmış panel karartma/uyku işlevi
 - AP+STA Wi-Fi, captive portal ve bağlantı durum göstergesi
 - Web üzerinden `firmware.bin` OTA güncellemesi
+- GitHub üzerinden çevrimiçi güncelleme: master dalına yapılan her push otomatik derlenir; cihaz yeni sürümü bulur ve kullanıcının onayıyla kurar, yeni firmware açılmazsa önceki sürüme döner
 - İsteğe bağlı olarak yerel ağdan (STA) erişimde HTTP Digest girişi; kayıtlı parolalar tarayıcıya gönderilmez
 - NVS/Preferences üzerinde kalıcı ayarlar ve eski şemaları otomatik yükseltme
 - Watchdog ve art arda çöken açılışlarda fabrika ayarına dönüş koruması
@@ -245,6 +248,7 @@ Ana sayfa aşağıdaki işlemleri sağlar:
 - Font, renk, dönüş, konum, gösterim alanı ve kaydırma ayarı
 - Panel başına doluluk göstergesi
 - Tasarımın flash belleğe kaydedilmesi
+- Panele uygulanmış geri sayımın başlatılması, durdurulması ve sıfırlanması
 
 Her kutunun **gösterim alanı** seçilebilir. “Yalnızca kendi paneli” seçildiğinde kutu kendi panelinin dışında kırpılır ve kayar yazı panelin kenarlarında döner; komşu paneldeki kutularla üst üste binmez. “Tüm ekran” seçildiğinde yazı bütün ekranda kayar. Yeni kutular kendi paneliyle başlar; 0.9.x sürümünden yükseltilen tasarımlar eski davranışı korumak için “Tüm ekran” olarak taşınır. Önizleme aynı kırpmayı gösterir.
 
@@ -259,10 +263,32 @@ TextBox aşağıdaki içerik türlerini gösterebilir:
 - Tarih
 - Sıcaklık
 - Nem (SHT40 veya HDC2022 seçiliyken)
+- Geri sayım (içerik döngüsüne eklenemez)
 
 İçerik döngüsü etkinleştirilirse seçilen türler `Yazı → Saat → Tarih → Sıcaklık → Nem` sırasıyla gösterilir. Geçiş süresi 1–3600 saniye arasında seçilebilir. Kayar yazı açıkken içerik geçişi, mevcut içeriğin tam turu tamamlandıktan sonra yapılır.
 
 Metin alanının dahili kapasitesi 48 byte'tır; sonlandırıcı nedeniyle kullanıcı metni en fazla 47 UTF-8 byte olabilir. Türkçe karakterlerin birden fazla UTF-8 byte kullanabileceği unutulmamalıdır.
+
+### Geri sayım
+
+TextBox veri türü **Geri Sayım** seçildiğinde kutu ayarlanan süreden sıfıra doğru sayar. Sınav, toplantı, sunum, yarışma veya mola gibi süresi belli her etkinlikte kullanılabilir.
+
+- **Süre:** Saat (0–23), dakika (0–59) ve saniye (0–59) olarak girilir; en az 1 saniye, en fazla 23:59:59 olabilir.
+- **Gösterim:** Biçimi ayarlanan süre belirler; böylece sayım boyunca yazının genişliği değişmez. Süre 1 saat veya daha uzunsa `1:05:00`, 1 saatten kısaysa `40:00`, 1 dakikadan kısaysa yalnızca saniye (`45`) gösterilir. Kalan süre yukarı yuvarlanır: başlangıçta tam süre görünür, `00` yalnızca süre dolduğunda görünür.
+- **Alarm (röle) süresi:** Sayım sıfıra ulaştığında GPIO42 alarm rölesi 0–3600 saniye çalışır; 0 alarmı kapatır.
+- **İçerik döngüsü:** Geri sayım döngüye eklenemez; Geri Sayım seçili kutuda döngü anahtarı kapalıdır.
+
+Tasarım panele uygulandıktan sonra ana sayfanın üstünde **Geri Sayım** kartı görünür. Kart, kutuların kalan süresini ve sayım durumunu gösterir:
+
+| Düğme | İşlev |
+|---|---|
+| Başlat / Devam Et | Sayımı başlatır; durdurulmuş sayımı kaldığı yerden sürdürür. Süre dolduktan sonra “Yeniden Başlat” olarak yeni bir sayım başlatır. |
+| Durdur | Sayımı duraklatır ve çalan geri sayım alarmını susturur. |
+| Sıfırla | Sayımı tam süreye döndürür ve alarmı susturur. Sayım sürerken veya durdurulmuşken onay istenir. |
+
+Tasarımdaki bütün Geri Sayım kutuları tek bir oturumla birlikte başlar ve durur. Her kutu kendi süresini sayar ve kendi sıfırında, kendi alarm süresiyle röleyi bir kez çalıştırır; örneğin 40 ve 60 dakikalık iki kutu aynı anda başlatılabilir. Programlanmış alarmlar ile geri sayım alarmı aynı röleyi kullanır; Durdur ve Sıfırla programlanmış alarmı kesmez.
+
+Sayım durumu yalnızca düğmelere basıldığında ve sayım bittiğinde NVS'ye (`countdown` namespace'i) yazılır. Sayım sürerken elektrik kesilirse cihaz açıldığında kesintide geçen süre DS3231 saatine göre eklenir ve sayım devam eder; kesinti sırasında sıfıra ulaşan kutular açılışta alarm çalmaz. DS3231 yoksa veya saati geçersizse sayım durdurulmuş olarak açılır ve kullanıcının **Devam Et** düğmesine basması beklenir. Sayım sürerken tasarım yeniden uygulanırsa sayım kesilmez; geçen süre kutuların yeni süreleriyle karşılaştırılır.
 
 ### ValueBox
 
@@ -442,12 +468,37 @@ Sıcaklık ve nem iki biçimde gösterilebilir:
 
 ### Alarm
 
+Ayarlar → Alarm Ayarları bölümünde iki mod vardır: **Manuel alarm** ve **Okul saati**. Aynı anda yalnızca seçili mod çalışır; diğer modun ayarları silinmez, mod değiştirilip kaydedildiğinde yeniden kullanılır.
+
+Manuel alarm:
+
 - En fazla 10 alarm
 - 1–3600 saniye röle aktif kalma süresi
 - Her gün, hafta içi veya kullanıcı tarafından seçilen günler
 - Aynı alarm aynı takvim gününde bir kez tetiklenir
-- Çakışan alarm sürelerinde röle kapanış zamanı daha ileri olana uzatılır
+
+Her iki modda:
+
+- Çakışan zil/alarm sürelerinde röle kapanış zamanı daha ileri olana uzatılır
+- Geri sayım aynı röleyi kullanır; röle, programlanmış alarm veya geri sayım alarmından biri sürdükçe açık kalır
+- **Zili Test Et** düğmesi röleyi hemen çalıştırır (okul saatinde zil süresi kadar, en fazla 30 saniye; manuel modda 3 saniye)
 - GPIO42 aktif HIGH çalışır
+
+### Okul saati
+
+Okul zili için hazırlanmış zil programıdır; cihazın alarm rölesini kullanır ama kurulumu ders programı mantığıyla yapılır.
+
+- **Ders programı:** “Ders Ekle” ile en fazla 20 ders eklenir; her dersin başlangıç saati ve dakikası ayarlanır. Her dersin altına isteğe bağlı bir **teneffüs zili** (ders bitişi) eklenir. Son dersin teneffüs zili okul çıkış zili olarak kullanılabilir. Dersler saat sırasıyla girilmelidir; her ders bir önceki dersin teneffüs zilinden sonra başlamalıdır. Editör ders ve teneffüs sürelerini (ör. “Ders 40 dk • Teneffüs 10 dk”) gösterir ve sıralama hatalarını kaydetmeden önce işaretler. Yeni ders, bir önceki teneffüs zilinden 10 dakika sonrası, yeni teneffüs ise ders başlangıcından 40 dakika sonrası olarak önerilir. İkili öğretimde sabahçı ve öğlenci dersleri aynı listeye sırayla eklenir.
+- **Çalışma günleri:** Haftanın her günü, sadece hafta içi veya seçilen günler (bütün program için).
+- **Zil süresi:** Bütün ziller için ortak, 1–3600 saniye.
+- **Öğrenci zili:** İsteğe bağlı olarak her dersten 1–10 dakika önce öğrencileri sınıfa çağıran ek bir zil çalar; ders başlangıç zili öğretmen zili olarak çalmaya devam eder. Öğrenci zili bir önceki dersin teneffüs zilinden sonra kalmalıdır.
+- **Resmi tatillerde zil çalmasın** (varsayılan açık, **yalnızca Türkiye'deki resmi tatiller**): 2429 sayılı Kanun'daki tatillerde zil çalmaz — 1 Ocak, 23 Nisan, 1 Mayıs, 19 Mayıs, 15 Temmuz, 30 Ağustos, 29 Ekim, Ramazan Bayramı (3 gün) ve Kurban Bayramı (4 gün). Yarım gün tatillerde (bayram arifeleri ve 28 Ekim) saat 13:00'ten sonraki ziller çalmaz. Dini bayram tarihleri Diyanet İşleri Başkanlığı'nın “Dini Günler Listesi”nden 2025–2035 için firmware'e gömülüdür (2033'te iki Ramazan Bayramı vardır); 2035'ten sonra yalnızca sabit tarihli tatiller tanınır ve tablo bir firmware güncellemesiyle uzatılmalıdır. Hükümetin ilan ettiği idari izin veya köprü günleri tatil dönemi olarak eklenmelidir.
+- **Tatil dönemleri:** Yaz tatili, yarıyıl tatili, ara tatiller veya idari izin gibi okulun kapalı olduğu en fazla 10 tarih aralığı eklenir; başlangıç ve bitiş günleri dahildir ve bu günlerde zil çalmaz. Tarihler yıl içerdiği için her eğitim yılında yenilenmelidir.
+- **10 Kasım saygı duruşu zili:** İsteğe bağlı olarak 10 Kasım'da saat 09:05'te zil çalar (okul günü değilse veya tatil dönemindeyse çalmaz).
+
+Okul saati bölümünün üstündeki durum kutusu kayıtlı ayarlara göre bugünün durumunu (okul günü, okul günü değil, tatil dönemi, resmi tatil, yarım gün resmi tatil) ve sıradaki zili gösterir; örneğin “Sıradaki zil: bugün 09:10 — 1. ders teneffüs zili”. Yaklaşan resmi tatiller de aynı bölümde listelenir. DS3231 okunamazsa okul zili çalmaz.
+
+Her zil bir dakikada en fazla bir kez çalar; saat geri alınsa bile aynı dakika için tekrar çalmaz. Aynı dakikaya denk gelen ziller tek zil olarak çalar.
 
 ### Panel uyku zamanlaması
 
@@ -491,11 +542,47 @@ ESP32-S3 yalnızca 2.4 GHz Wi-Fi destekler. STA ağı 5 GHz-only olmamalıdır.
 
 STA girişi açıksa yerel ağdan yapılan güncelleme portal girişini gerektirir. OTA sırasında cihazın ve panelin beslemesini kesmeyin. Firmware güncelleme servisi uzun flash işlemleri sırasında watchdog'u besler.
 
+### Yeni firmware'in onaylanması ve geri dönüş
+
+Yeni firmware (dosyadan veya çevrimiçi kurulmuş) ilk açılışında “doğrulama bekliyor” durumundadır. Cihaz 60 saniye kararlı çalıştığında veya planlı bir yeniden başlatma yapıldığında firmware onaylanır. Onaydan önce panik, watchdog, brownout ya da elektrik kesintisiyle yeniden başlarsa bootloader önceki firmware'i açar. Bu nedenle güncellemeden sonraki ilk dakika cihazın elektriği kesilmemelidir. Çevrimiçi kurulan bir sürüm açılamazsa Yazılım Güncelleme bölümünde “… sürümü başlatılamadı; cihaz önceki sürüme döndü.” uyarısı görünür.
+
+## Çevrimiçi güncelleme (GitHub)
+
+### Yayınlama
+
+[`.github/workflows/firmware.yml`](.github/workflows/firmware.yml), **master** dalına yapılan her push'ta firmware'i GitHub Actions üzerinde derler ve sonucu repodaki **`firmware`** dalına yükler. Başka dallara yapılan push'lar yayın yapmaz. `firmware` dalı her yayında tek bir commit olarak yeniden yazılır, eski binary'ler repoda birikmez. Daldaki dosyalar [`tools/publish_firmware.py`](tools/publish_firmware.py) ile hazırlanır:
+
+| Dosya | İçerik |
+|---|---|
+| `firmware.json` | `version` (`AppConfig.h` içindeki `FIRMWARE_VERSION`), indirilecek dosyanın adı, boyutu, SHA-256 özeti, kaynak commit ve commit başlığı |
+| `firmware-<sürüm>-<commit>.bin` | Cihazların indirdiği firmware; her derlemede farklı ad, böylece önbellekteki eski dosya yeni bilgiyle karışmaz |
+| `firmware.bin` | Aynı dosya; portaldan elle yükleme için |
+
+Cihazlar yalnızca `FIRMWARE_VERSION` kendi sürümlerinden yüksekse güncelleme önerir; bu yüzden her değişiklikte sürüm yükseltilmelidir. Derleme push'tan sonra yaklaşık 5–8 dakika sürer; ilerlemesi GitHub'daki **Actions** sekmesinden izlenebilir. Yerel ve bulut derlemesi aynı araç zincirini kullansın diye `platformio.ini` içindeki pioarduino platformu `55.03.34` sürümüne sabitlenmiştir.
+
+Gereksinimler:
+
+- Repo **public** olmalıdır. Cihazda GitHub kimlik bilgisi yoktur; private repoda `firmware.json` isteği HTTP 404 ile döner.
+- GitHub Actions açık olmalıdır. Push adımı izin hatası verirse repo ayarlarında **Settings → Actions → General → Workflow permissions** için “Read and write permissions” seçilmelidir.
+- Repo public olduğunda `AppConfig.h` içindeki varsayılan AP parolası (`00000000`) herkes tarafından görülebilir; cihaz devreye alınırken AP parolası mutlaka değiştirilmelidir.
+
+### Cihaz tarafı
+
+Ayarlar → Yazılım Güncelleme → **Çevrimiçi güncelleme** bölümü:
+
+- Cihaz STA ağı üzerinden internete bağlandıktan 2 dakika sonra ve sonra günde bir kez `firmware.json` dosyasını kontrol eder (başarısız denetim 1 saat sonra tekrarlanır). **Şimdi Denetle** düğmesi denetimi hemen başlatır; otomatik denetim kapatılabilir.
+- Daha yüksek bir sürüm bulunursa sekmede **Yeni** etiketi, bölümde sürüm, boyut ve son commit başlığı görünür. **Güncelle** düğmesi onay istedikten sonra dosyayı HTTPS ile indirir; ilerleme çubuğu gösterilir.
+- İndirilen dosyanın boyutu ve SHA-256 özeti `firmware.json` ile karşılaştırılır, ardından ESP32 imaj doğrulaması yapılır. Uyuşmazlıkta güncelleme iptal edilir ve çalışan firmware değişmez. Bağlantı, cihazın gömülü kök sertifika paketiyle doğrulanır.
+- Kurulumdan sonra cihaz yeniden başlar; sayfa cihaz açılınca kendiliğinden yenilenir. Yeni firmware yukarıda anlatılan şekilde onaylanır.
+- İndirme ve flash'a yazma ayrı bir görevde yapılır; panel ve portal çalışmaya devam eder. Çevrimiçi güncelleme sürerken dosyadan yükleme reddedilir.
+
+SHA-256 denetimi bozuk veya yarım indirmeyi yakalar; GitHub hesabının ele geçirilmesine karşı koruma sağlamaz. Hesapta iki adımlı doğrulama açık tutulmalı ve master dalına yalnızca güvenilen kişiler push yapabilmelidir.
+
 ## Kalıcı ayarlar ve güvenli açılış
 
-Panel, ağ, UART, uyku, NTP, alarm ve içerik ayarları ESP32 Preferences/NVS içinde `step-rgb` namespace'i altında tutulur.
+Panel, ağ, UART, uyku, NTP, alarm, okul saati ve içerik ayarları ESP32 Preferences/NVS içinde `step-rgb` namespace'i altında tutulur. Okul saati programı `school_bell` (şema sürümü 1), etkin alarm modu `alarm_mode` anahtarındadır; bu anahtarlar yoksa manuel alarm modu ve boş bir okul programı kullanılır.
 
-İçerik ayarları şema sürümü 7'dir. Eski içerik şemaları 1–6 arasında algılanıp yeni yapıya taşınır; taşınan kutular “Tüm ekran” gösterim alanını, float ValueBox'lar 1 ondalık basamağı korur. Kayıtlı blok yükleme ve taşıma sırasında ana döngü yığınına değil heap'e alınır. Alarm şeması sürüm 2'dir ve eski tekrar ayarları gün maskesine yükseltilir. Geçersiz veya eksik NVS verileri güvenli varsayılanlarla onarılır.
+İçerik ayarları şema sürümü 8'dir. Eski içerik şemaları 1–7 arasında algılanıp yeni yapıya taşınır; taşınan kutular “Tüm ekran” gösterim alanını, float ValueBox'lar 1 ondalık basamağı korur ve geri sayım alanları varsayılan değerleri (40 dakika, 10 saniye alarm) alır. Geri sayımın çalışma durumu ayrı `countdown` namespace'inde tutulur. Kayıtlı blok yükleme ve taşıma sırasında ana döngü yığınına değil heap'e alınır. Alarm şeması sürüm 2'dir ve eski tekrar ayarları gün maskesine yükseltilir. Geçersiz veya eksik NVS verileri güvenli varsayılanlarla onarılır.
 
 Boot guard yalnızca anormal biten açılışları sayar: önceki çalışma panik, watchdog veya brownout ile bittiyse sayaç artar. Güç kesip açmak, reset butonu veya yazılımsal yeniden başlatma zinciri sıfırlar; böylece cihazı kısa aralıklarla açıp kapatmak fabrika ayarına dönüşü tetiklemez. Cihaz 60 saniye kararlı çalışınca sayaç temizlenir. Beşten fazla art arda anormal reset algılanırsa ayarlar fabrika varsayılanlarına döndürülür.
 
@@ -515,16 +602,21 @@ Bu uç noktalar web arayüzünün dahili API'sidir; sürümler arasında değiş
 | POST | `/api/content` | İçerik tasarımını doğrular ve kaydeder |
 | GET | `/api/font?id=N` | Font bitmap ve glif metriklerini döndürür |
 | GET | `/api/temperature` | Seçili sensörü, bulunma durumunu, sıcaklık ve nemi döndürür |
+| GET | `/api/countdown` | Geri sayım durumunu, geçen süreyi, alarm durumunu ve kutuların kalan süresini döndürür |
+| POST | `/api/countdown` | `action=start`, `pause` veya `reset` ile geri sayımı başlatır, durdurur veya sıfırlar |
 | POST | `/api/settings/panel` | Panel ayarlarını kaydeder; yalnızca parlaklık değiştiyse yeniden başlatmaz |
 | POST | `/api/settings/clock` | DS3231 saat/tarihini ayarlar |
 | POST | `/api/settings/sleep` | Panel uyku ayarlarını kaydeder |
 | POST | `/api/settings/time-sync` | NTP sunucusu, saat dilimi ve açık/kapalı durumunu kaydeder |
 | POST | `/api/settings/temperature-sensor` | Sensör modelini ve sensöre özgü ayarları kaydedip uygular |
-| POST | `/api/settings/alarms` | Alarm listesini kaydeder |
+| POST | `/api/settings/alarms` | Alarm modunu, manuel alarm listesini ve okul saati programını kaydeder |
+| POST | `/api/alarm/test` | `seconds=1…30` ile röleyi test için çalıştırır |
 | POST | `/api/settings/communication` | Slave ID ve UART/RS485 ayarlarını kaydeder |
 | POST | `/api/settings/wifi` | AP/STA ayarlarını kaydeder |
 | POST | `/api/panel/test?color=red|green|blue` | 750 ms renk testi başlatır |
 | POST | `/api/firmware/update` | `firmware.bin` OTA yüklemesi |
+| GET | `/api/firmware/online` | Çevrimiçi güncelleme durumu, bulunan sürüm ve indirme ilerlemesi |
+| POST | `/api/firmware/online` | `action=check`, `action=install` veya `action=auto&enabled=0/1` |
 
 HTML, çeviri betiği ve font verileri cihazdan `no-store` başlıklarıyla sunulur. Ana HTML ve dil paketi Flash içinde gzip sıkıştırılmış olarak saklanır.
 
@@ -610,6 +702,7 @@ Betik:
 
 ```text
 ESP32_S3_LedMatrix_Controller/
+├── .github/workflows/firmware.yml  # Her master push'unda derleyip firmware dalına yükler
 ├── include/
 │   ├── AppConfig.h                 # Pinler ve sabit çalışma değerleri
 │   ├── ContentModel.h              # TextBox/ValueBox veri modeli
@@ -627,13 +720,18 @@ ESP32_S3_LedMatrix_Controller/
 │   ├── PanelDisplay.cpp            # HUB75 DMA ve panel eşleme
 │   ├── PanelContentApplication.cpp # İçerik çizimi/kaydırma
 │   ├── PortalApplication.cpp       # HTTP portalı ve API'ler
+│   ├── CountdownApplication.cpp    # Geri sayım ve kalıcı oturum
+│   ├── SchoolBellSchedule.cpp      # Okul saati kuralları (gün durumu, sıradaki zil)
+│   ├── TurkishHolidays.cpp         # Türkiye resmi tatilleri ve dini bayram tablosu
 │   ├── ModbusRtuSlaveService.cpp   # Modbus RTU slave
 │   ├── SettingsService.cpp         # NVS, doğrulama ve migration
 │   ├── TimeSyncApplication.cpp     # NTP → DS3231 eşitleme
+│   ├── OnlineUpdateService.cpp     # GitHub üzerinden çevrimiçi güncelleme
 │   └── ...
 ├── tools/
 │   ├── generate_portal_compressed.mjs
-│   └── generate_turkish_font_extensions.py
+│   ├── generate_turkish_font_extensions.py
+│   └── publish_firmware.py         # firmware dalı için dosyaları hazırlar
 ├── web/
 │   └── portal-i18n.js              # Beş dilli çeviri paketi
 └── platformio.ini
@@ -715,6 +813,10 @@ ESP32_S3_LedMatrix_Controller/
 - Toplam içerik kapasitesi en fazla 32 kutudur.
 - TextBox metni en fazla 47 UTF-8 byte olabilir.
 - Runtime Modbus/sayaç değerleri yeniden başlatmalar arasında saklanmaz.
+- Tasarımdaki bütün Geri Sayım kutuları tek bir oturumla yönetilir; kutular ayrı ayrı başlatılamaz.
+- Okul saatinde bütün okul günleri için tek bir ders programı vardır; örneğin cumaya özel farklı bir program tanımlanamaz.
+- Dini bayram tarihleri 2035 yılına kadar firmware içindedir; sonrası için firmware güncellemesi gerekir. Yalnızca Türkiye'deki resmi tatiller tanınır.
+- Geri sayım sürerken DS3231 saati değiştirilir (elle veya NTP ile) ve ardından elektrik kesilirse, kesintide geçen süre saat farkı kadar hatalı hesaplanabilir.
 - Portal HTTP üzerinden çalışır (TLS yok). STA girişi isteğe bağlıdır; açıldığında tek bir yönetici girişi vardır ve parolası AP parolasıdır.
 - Panelde yalnızca ASCII, Türkçe, Almanca ve İspanyolca harfler ile `°` gösterilebilir; Arapça metin panelde gösterilemez.
 - Dijital sayaç debounce nedeniyle saniyede en fazla yaklaşık 16 darbe sayar.

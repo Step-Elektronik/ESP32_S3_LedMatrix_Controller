@@ -6,6 +6,7 @@
 #include <cmath>
 
 #include "ClockApplication.h"
+#include "CountdownApplication.h"
 #include "PanelDisplay.h"
 #include "SettingsService.h"
 #include "TemperatureApplication.h"
@@ -22,7 +23,7 @@ uint8_t cycleTypeCount(uint8_t mask)
 {
   uint8_t count = 0;
   for (uint8_t type = 0;
-       type <= static_cast<uint8_t>(lastContentType);
+       type <= static_cast<uint8_t>(lastCycleContentType);
        ++type) {
     if (cycleContains(mask, static_cast<ContentType>(type))) {
       ++count;
@@ -34,7 +35,7 @@ uint8_t cycleTypeCount(uint8_t mask)
 ContentType firstCycleType(uint8_t mask, ContentType fallback)
 {
   for (uint8_t type = 0;
-       type <= static_cast<uint8_t>(lastContentType);
+       type <= static_cast<uint8_t>(lastCycleContentType);
        ++type) {
     const ContentType candidate = static_cast<ContentType>(type);
     if (cycleContains(mask, candidate)) {
@@ -59,7 +60,7 @@ ContentType advanceCycleType(
   while (steps > 0) {
     type = static_cast<uint8_t>(
       (type + 1U)
-      % (static_cast<uint8_t>(lastContentType) + 1U));
+      % (static_cast<uint8_t>(lastCycleContentType) + 1U));
     if (cycleContains(mask, static_cast<ContentType>(type))) {
       --steps;
     }
@@ -74,11 +75,13 @@ PanelContentApplication::PanelContentApplication(
   ClockApplication &clock,
   TemperatureApplication &temperature,
   ValueBoxApplication &valueBoxes,
+  CountdownApplication &countdown,
   SettingsService &settings)
   : panel_(panel),
     clock_(clock),
     temperature_(temperature),
     valueBoxes_(valueBoxes),
+    countdown_(countdown),
     settings_(settings)
 {
 }
@@ -110,6 +113,7 @@ void PanelContentApplication::update()
   const ClockDateTime dateTime = clock_.dateTime();
   const uint32_t temperatureRevision = temperature_.revision();
   const uint32_t valueBoxRevision = valueBoxes_.revision();
+  const uint32_t countdownRevision = countdown_.revision();
 
   for (uint8_t index = 0; index < content.count; ++index) {
     const ContentItemSettings &item = content.items[index];
@@ -133,11 +137,16 @@ void PanelContentApplication::update()
         && temperatureRevision != lastTemperatureRevision_) {
       redrawRequired = true;
     }
+    if (activeType == ContentType::countdown
+        && countdownRevision != lastCountdownRevision_) {
+      redrawRequired = true;
+    }
   }
 
   lastClockSecond_ = dateTime.second;
   lastClockDay_ = dateTime.day;
   lastTemperatureRevision_ = temperatureRevision;
+  lastCountdownRevision_ = countdownRevision;
   if (valueBoxRevision != lastValueBoxRevision_) {
     redrawRequired = true;
   }
@@ -179,6 +188,7 @@ void PanelContentApplication::reload()
   lastClockDay_ = UINT8_MAX;
   lastTemperatureRevision_ = UINT32_MAX;
   lastValueBoxRevision_ = UINT32_MAX;
+  lastCountdownRevision_ = UINT32_MAX;
   refresh();
 }
 
@@ -514,6 +524,9 @@ void PanelContentApplication::buildText(
         // "TMP?", "SHT?" or "HDC?" names the sensor that is missing.
         strlcpy(buffer, temperature_.missingText(), bufferSize);
       }
+      break;
+    case ContentType::countdown:
+      countdown_.format(item, buffer, bufferSize);
       break;
     case ContentType::humidity:
       if (!temperature_.humiditySupported()) {

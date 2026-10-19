@@ -13,6 +13,8 @@ public:
 
 private:
   bool resetCounter();
+  // Cancels the bootloader rollback of a freshly installed firmware.
+  void confirmRunningFirmware();
 
   Preferences preferences_;
   uint32_t bootStartedAt_ = 0;

@@ -3,9 +3,14 @@
 #include <WebServer.h>
 #include <stdint.h>
 
+struct SchoolBellSettings;
+
+class AlarmApplication;
 class ClockApplication;
+class CountdownApplication;
 class BootGuardService;
 class FirmwareUpdateService;
+class OnlineUpdateService;
 class PanelContentApplication;
 class PanelDisplay;
 class PanelSleepApplication;
@@ -24,11 +29,14 @@ public:
     TemperatureApplication &temperature,
     PanelContentApplication &content,
     ValueBoxApplication &valueBoxes,
+    CountdownApplication &countdown,
+    AlarmApplication &alarm,
     PanelSleepApplication &panelSleep,
     WiFiApplication &wifi,
     TimeSyncApplication &timeSync,
     BootGuardService &bootGuard,
-    FirmwareUpdateService &firmwareUpdate);
+    FirmwareUpdateService &firmwareUpdate,
+    OnlineUpdateService &onlineUpdate);
 
   void begin();
   void update();
@@ -56,6 +64,8 @@ private:
   void sendContentJson();
   void sendFontPreviewData();
   void sendTemperatureJson();
+  void sendCountdownJson();
+  void controlCountdown();
 
   void saveContentSettings();
   void savePanelSettings();
@@ -64,17 +74,24 @@ private:
   void saveTimeSyncSettings();
   void saveTemperatureSensorSettings();
   void saveAlarmSettings();
+  bool parseSchoolBellSettings(SchoolBellSettings &school, String &error) const;
+  void testAlarmRelay();
   void saveCommunicationSettings();
   void saveNetworkSettings();
   void startPanelColorTest();
   void handleFirmwareUpload();
   void finishFirmwareUploadRequest();
+  void sendOnlineUpdateJson();
+  void controlOnlineUpdate();
+  String buildOnlineUpdateJson(const String &message = String()) const;
 
   String buildSettingsJson();
   String buildWifiStatusJson() const;
   String buildContentJson() const;
   String buildTemperatureJson() const;
+  String buildCountdownJson(const String &message = String()) const;
   void appendSensorJson(String &json) const;
+  void appendSchoolBellJson(String &json) const;
 
   void sendJson(
     bool success,
@@ -91,15 +108,19 @@ private:
   TemperatureApplication &temperature_;
   PanelContentApplication &content_;
   ValueBoxApplication &valueBoxes_;
+  CountdownApplication &countdown_;
+  AlarmApplication &alarm_;
   PanelSleepApplication &panelSleep_;
   WiFiApplication &wifi_;
   TimeSyncApplication &timeSync_;
   BootGuardService &bootGuard_;
   FirmwareUpdateService &firmwareUpdate_;
+  OnlineUpdateService &onlineUpdate_;
   WebServer webServer_;
   bool colorTestActive_ = false;
   uint32_t colorTestStartedAt_ = 0;
   bool restartPending_ = false;
   uint32_t restartScheduledAt_ = 0;
   bool uploadAuthorized_ = false;
+  bool uploadBlocked_ = false;
 };

@@ -1,0 +1,65 @@
+name: Firmware
+
+# Every push to master builds the firmware and publishes it to the
+# "firmware" branch, where devices look for online updates
+# (AppConfig::OnlineUpdate). That branch always holds a single commit, so old
+# binaries do not pile up in the repository.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: firmware-publish
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: platformio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware
+        run: pio run -e esp32-s3-devkitc1-n8r2
+
+      - name: Prepare firmware files
+        id: files
+        run: >
+          python tools/publish_firmware.py
+          .pio/build/esp32-s3-devkitc1-n8r2/firmware.bin
+          publish
+          "$GITHUB_SHA"
+          "$(git log -1 --format=%s)"
+
+      - name: Publish to the firmware branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.files.outputs.version }}
+        run: |
+          cd publish
+          git init -q -b firmware
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Firmware $VERSION (${GITHUB_SHA::7})"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" firmware

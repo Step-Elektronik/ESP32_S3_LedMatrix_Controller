@@ -7,6 +7,7 @@
 #include "AlarmModel.h"
 #include "AppConfig.h"
 #include "ContentModel.h"
+#include "SchoolBellModel.h"
 #include "TemperatureSensorModel.h"
 
 enum class PanelConnectionStyle : uint8_t {
@@ -86,6 +87,8 @@ public:
   const TimeSyncSettings &timeSync() const;
   const TemperatureSensorSettings &temperatureSensor() const;
   const AlarmSettings &alarms() const;
+  const SchoolBellSettings &schoolBell() const;
+  AlarmMode alarmMode() const;
   const ContentSettings &content() const;
   bool usesDefaultApPassword() const;
 
@@ -96,6 +99,8 @@ public:
   bool saveTimeSync(const TimeSyncSettings &settings);
   bool saveTemperatureSensor(const TemperatureSensorSettings &settings);
   bool saveAlarms(const AlarmSettings &settings);
+  bool saveSchoolBell(const SchoolBellSettings &settings);
+  bool saveAlarmMode(AlarmMode mode);
   bool saveContent(const ContentSettings &settings);
   bool factoryReset();
 
@@ -112,6 +117,9 @@ public:
   // True when a TextBox shows humidity directly or in its content cycle.
   static bool contentUsesHumidity(const ContentSettings &settings);
   static bool validateAlarms(const AlarmSettings &settings, String &error);
+  static bool validateSchoolBell(
+    const SchoolBellSettings &settings,
+    String &error);
   static bool validateContent(
     const ContentSettings &settings,
     const PanelSettings &panel,
@@ -121,6 +129,7 @@ private:
   void loadDefaults();
   bool loadContent();
   bool loadTemperatureSensor();
+  bool loadSchoolBell();
 
   Preferences preferences_;
   PanelSettings panel_;
@@ -130,6 +139,8 @@ private:
   TimeSyncSettings timeSync_;
   TemperatureSensorSettings temperatureSensor_;
   AlarmSettings alarms_;
+  SchoolBellSettings schoolBell_;
+  AlarmMode alarmMode_ = AlarmMode::manual;
   ContentSettings content_;
   bool ready_ = false;
 };

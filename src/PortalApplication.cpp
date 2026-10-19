@@ -8,17 +8,23 @@
 #include <memory>
 #include <new>
 
+#include "AlarmApplication.h"
 #include "AppConfig.h"
 #include "BootGuardService.h"
+#include "CalendarDate.h"
 #include "ClockApplication.h"
+#include "CountdownApplication.h"
 #include "FirmwareUpdateService.h"
+#include "OnlineUpdateService.h"
 #include "PanelContentApplication.h"
 #include "PanelDisplay.h"
 #include "PanelSleepApplication.h"
 #include "PortalCompressed.h"
+#include "SchoolBellSchedule.h"
 #include "SettingsService.h"
 #include "TemperatureApplication.h"
 #include "TimeSyncApplication.h"
+#include "TurkishHolidays.h"
 #include "UiText.h"
 #include "ValueBoxApplication.h"
 #include "WiFiApplication.h"
@@ -30,7 +36,7 @@ constexpr uint32_t colorTestDurationMs = 750;
 constexpr size_t maximumContentBodySize = 8192;
 constexpr size_t fontPreviewHeaderSize = 14;
 constexpr size_t fontPreviewGlyphSize = 8;
-constexpr uint8_t maximumContentFields = 23;
+constexpr uint8_t maximumContentFields = 25;
 
 void writeLittleEndian16(uint8_t *target, uint16_t value)
 {
@@ -200,6 +206,27 @@ bool parseMinuteOfDay(const String &text, uint16_t &result)
   return true;
 }
 
+// "YYYY-MM-DD" from a date input, stored as YYYYMMDD.
+bool parseDateKey(const String &text, uint32_t &key)
+{
+  unsigned year = 0;
+  unsigned month = 0;
+  unsigned day = 0;
+  char trailing = '\0';
+  if (sscanf(text.c_str(), "%u-%u-%u%c", &year, &month, &day, &trailing) != 3
+      || year > 9999
+      || month > 12
+      || day > 31
+      || !isValidDate(
+        static_cast<uint16_t>(year),
+        static_cast<uint8_t>(month),
+        static_cast<uint8_t>(day))) {
+    return false;
+  }
+  key = year * 10000UL + month * 100UL + day;
+  return true;
+}
+
 int8_t hexValue(char character)
 {
   if (character >= '0' && character <= '9') {
@@ -281,7 +308,8 @@ bool parseColor(
 //  8 speed, 9 text (percent-encoded; ValueBox: unit suffix), 10 cycle,
 //  11 cycle mask, 12 cycle interval, 13 kind, 14 initial value, 15 source,
 //  16 register, 17 value type, 18 counter direction, 19 temperature format,
-//  20 font, 21 scroll/clip area, 22 ValueBox decimals.
+//  20 font, 21 scroll/clip area, 22 ValueBox decimals, 23 countdown
+//  seconds, 24 countdown alarm seconds.
 // Shorter records from older portal versions are still accepted.
 bool parseContentPayload(
   const String &payload,
@@ -313,6 +341,7 @@ bool parseContentPayload(
         && fieldCount != 19
         && fieldCount != 20
         && fieldCount != 21
+        && fieldCount != 23
         && fieldCount != maximumContentFields) {
       error = UI_TEXT("İçerik kutusu veri formatı geçersiz.");
       return false;
@@ -444,7 +473,7 @@ bool parseContentPayload(
       return false;
     }
 
-    if (fieldCount >= maximumContentFields) {
+    if (fieldCount >= 23) {
       if (!parseUnsignedByte(
             fields[21],
             static_cast<uint8_t>(ScrollArea::panel),
@@ -461,6 +490,13 @@ bool parseContentPayload(
                && item.valueSource == ValueSource::modbus
                && item.modbusValueType == ModbusValueType::ieee754Float) {
       valueDecimals = 1;
+    }
+
+    if (fieldCount >= maximumContentFields
+        && (!parseUnsigned32(fields[23], 0, maximumCountdownSeconds, item.countdownSeconds)
+            || !parseUnsigned16(fields[24], 0, maximumCountdownAlarmSeconds, item.countdownAlarmSeconds))) {
+      error = UI_TEXT("Geri sayım alanlarından biri geçersiz.");
+      return false;
     }
 
     String decodedText;
@@ -491,6 +527,12 @@ bool parseContentPayload(
       item.cycleContentMask = contentTypeMask(ContentType::text);
     } else {
       item.valueDecimals = 0;
+    }
+    if (item.boxKind == ContentBoxKind::textBox
+        && item.type == ContentType::countdown) {
+      // A countdown is never part of a content cycle.
+      item.cycleEnabled = false;
+      item.cycleContentMask = contentTypeMask(ContentType::text);
     }
     ++content.count;
   }
@@ -533,22 +575,28 @@ PortalApplication::PortalApplication(
   TemperatureApplication &temperature,
   PanelContentApplication &content,
   ValueBoxApplication &valueBoxes,
+  CountdownApplication &countdown,
+  AlarmApplication &alarm,
   PanelSleepApplication &panelSleep,
   WiFiApplication &wifi,
   TimeSyncApplication &timeSync,
   BootGuardService &bootGuard,
-  FirmwareUpdateService &firmwareUpdate)
+  FirmwareUpdateService &firmwareUpdate,
+  OnlineUpdateService &onlineUpdate)
   : settings_(settings),
     panel_(panel),
     clock_(clock),
     temperature_(temperature),
     content_(content),
     valueBoxes_(valueBoxes),
+    countdown_(countdown),
+    alarm_(alarm),
     panelSleep_(panelSleep),
     wifi_(wifi),
     timeSync_(timeSync),
     bootGuard_(bootGuard),
     firmwareUpdate_(firmwareUpdate),
+    onlineUpdate_(onlineUpdate),
     webServer_(AppConfig::Network::httpPort)
 {
 }
@@ -590,15 +638,20 @@ void PortalApplication::configureRoutes()
   onAuthorized("/api/content", HTTP_POST, &PortalApplication::saveContentSettings);
   onAuthorized("/api/font", HTTP_GET, &PortalApplication::sendFontPreviewData);
   onAuthorized("/api/temperature", HTTP_GET, &PortalApplication::sendTemperatureJson);
+  onAuthorized("/api/countdown", HTTP_GET, &PortalApplication::sendCountdownJson);
+  onAuthorized("/api/countdown", HTTP_POST, &PortalApplication::controlCountdown);
   onAuthorized("/api/settings/panel", HTTP_POST, &PortalApplication::savePanelSettings);
   onAuthorized("/api/settings/clock", HTTP_POST, &PortalApplication::saveClockSettings);
   onAuthorized("/api/settings/sleep", HTTP_POST, &PortalApplication::saveSleepSettings);
   onAuthorized("/api/settings/time-sync", HTTP_POST, &PortalApplication::saveTimeSyncSettings);
   onAuthorized("/api/settings/temperature-sensor", HTTP_POST, &PortalApplication::saveTemperatureSensorSettings);
   onAuthorized("/api/settings/alarms", HTTP_POST, &PortalApplication::saveAlarmSettings);
+  onAuthorized("/api/alarm/test", HTTP_POST, &PortalApplication::testAlarmRelay);
   onAuthorized("/api/settings/communication", HTTP_POST, &PortalApplication::saveCommunicationSettings);
   onAuthorized("/api/settings/wifi", HTTP_POST, &PortalApplication::saveNetworkSettings);
   onAuthorized("/api/panel/test", HTTP_POST, &PortalApplication::startPanelColorTest);
+  onAuthorized("/api/firmware/online", HTTP_GET, &PortalApplication::sendOnlineUpdateJson);
+  onAuthorized("/api/firmware/online", HTTP_POST, &PortalApplication::controlOnlineUpdate);
   webServer_.on(
     "/api/firmware/update",
     HTTP_POST,
@@ -865,6 +918,38 @@ void PortalApplication::sendTemperatureJson()
   webServer_.send(200, "application/json; charset=utf-8", buildTemperatureJson());
 }
 
+void PortalApplication::sendCountdownJson()
+{
+  webServer_.sendHeader("Cache-Control", "no-store");
+  webServer_.send(200, "application/json; charset=utf-8", buildCountdownJson());
+}
+
+void PortalApplication::controlCountdown()
+{
+  const String action = webServer_.arg("action");
+  String message;
+  if (action == "start") {
+    if (!countdown_.start()) {
+      sendJson(false, UI_TEXT("Tasarımda geri sayım kutusu yok. Önce bir TextBox'ın veri türünü Geri Sayım yapıp panele uygulayın."), 409);
+      return;
+    }
+    message = UI_TEXT("Geri sayım başlatıldı.");
+  } else if (action == "pause") {
+    countdown_.pause();
+    message = UI_TEXT("Geri sayım durduruldu.");
+  } else if (action == "reset") {
+    countdown_.reset();
+    message = UI_TEXT("Geri sayım sıfırlandı.");
+  } else {
+    sendJson(false, UI_TEXT("Geçersiz geri sayım komutu."), 400);
+    return;
+  }
+
+  content_.refresh();
+  webServer_.sendHeader("Cache-Control", "no-store");
+  webServer_.send(200, "application/json; charset=utf-8", buildCountdownJson(message));
+}
+
 void PortalApplication::handleFirmwareUpload()
 {
   HTTPUpload &upload = webServer_.upload();
@@ -875,8 +960,13 @@ void PortalApplication::handleFirmwareUpload()
     if (!uploadAuthorized_) {
       Serial.println("OTA upload rejected: authentication required.");
     }
+    // The online update owns the OTA partition while it downloads.
+    uploadBlocked_ = uploadAuthorized_ && onlineUpdate_.busy();
+    if (uploadBlocked_) {
+      Serial.println("OTA upload rejected: online update in progress.");
+    }
   }
-  if (!uploadAuthorized_) {
+  if (!uploadAuthorized_ || uploadBlocked_) {
     return;
   }
 
@@ -898,6 +988,11 @@ void PortalApplication::handleFirmwareUpload()
 
 void PortalApplication::finishFirmwareUploadRequest()
 {
+  if (uploadBlocked_) {
+    uploadBlocked_ = false;
+    sendJson(false, UI_TEXT("Çevrimiçi güncelleme sürerken dosya yüklenemez."), 409);
+    return;
+  }
   if (!firmwareUpdate_.uploadStarted()) {
     sendJson(false, UI_TEXT("firmware.bin dosyası gönderilmedi."), 400);
     return;
@@ -912,6 +1007,80 @@ void PortalApplication::finishFirmwareUploadRequest()
   if (success) {
     scheduleRestart();
   }
+}
+
+void PortalApplication::sendOnlineUpdateJson()
+{
+  webServer_.sendHeader("Cache-Control", "no-store");
+  webServer_.send(200, "application/json; charset=utf-8", buildOnlineUpdateJson());
+}
+
+void PortalApplication::controlOnlineUpdate()
+{
+  const String action = webServer_.arg("action");
+  String message;
+  bool accepted = true;
+  if (action == "check") {
+    accepted = onlineUpdate_.requestCheck(message);
+  } else if (action == "install") {
+    accepted = onlineUpdate_.requestInstall(message);
+  } else if (action == "auto") {
+    const bool enabled = webServer_.arg("enabled") == "1";
+    onlineUpdate_.setAutomaticCheck(enabled);
+    message = enabled
+      ? UI_TEXT("Otomatik güncelleme denetimi açıldı.")
+      : UI_TEXT("Otomatik güncelleme denetimi kapatıldı.");
+  } else {
+    sendJson(false, UI_TEXT("Geçersiz güncelleme komutu."), 400);
+    return;
+  }
+
+  if (!accepted) {
+    sendJson(false, message, 409);
+    return;
+  }
+  webServer_.sendHeader("Cache-Control", "no-store");
+  webServer_.send(200, "application/json; charset=utf-8", buildOnlineUpdateJson(message));
+}
+
+String PortalApplication::buildOnlineUpdateJson(const String &message) const
+{
+  static const char *const stateNames[] = {
+    "idle", "checking", "upToDate", "available", "downloading", "installed", "failed"
+  };
+  const OnlineUpdateStatus status = onlineUpdate_.status();
+  String json;
+  json.reserve(512 + status.notes.length());
+  json += F("{\"ok\":true,\"current\":\"");
+  json += escapeJson(AppConfig::firmwareVersion);
+  json += F("\",\"repository\":\"");
+  json += escapeJson(AppConfig::OnlineUpdate::repositoryName);
+  json += F("\",\"state\":\"");
+  json += stateNames[static_cast<uint8_t>(status.state)];
+  json += F("\",\"updateAvailable\":");
+  json += status.updateAvailable ? F("true") : F("false");
+  json += F(",\"automatic\":");
+  json += status.automaticCheck ? F("true") : F("false");
+  json += F(",\"stationConnected\":");
+  json += status.stationConnected ? F("true") : F("false");
+  json += F(",\"progress\":");
+  json += status.progress;
+  json += F(",\"secondsSinceCheck\":");
+  json += status.secondsSinceCheck;
+  json += F(",\"latest\":\"");
+  json += escapeJson(status.latestVersion);
+  json += F("\",\"notes\":\"");
+  json += escapeJson(status.notes);
+  json += F("\",\"size\":");
+  json += status.size;
+  json += F(",\"error\":\"");
+  json += escapeJson(status.message);
+  json += F("\",\"rolledBack\":\"");
+  json += escapeJson(status.rolledBackVersion);
+  json += F("\",\"message\":\"");
+  json += escapeJson(message);
+  json += F("\"}");
+  return json;
 }
 
 void PortalApplication::saveContentSettings()
@@ -945,6 +1114,7 @@ void PortalApplication::saveContentSettings()
   }
 
   valueBoxes_.reload();
+  countdown_.reload();
   content_.reload();
   sendJson(true, UI_TEXT("Ekran tasarımı panele uygulandı ve kaydedildi."));
 }
@@ -1197,6 +1367,21 @@ void PortalApplication::saveTemperatureSensorSettings()
 
 void PortalApplication::saveAlarmSettings()
 {
+  AlarmMode mode = settings_.alarmMode();
+  String modeText;
+  if (postValue("alarmMode", modeText)) {
+    uint8_t value = 0;
+    if (!parseUnsignedByte(
+          modeText,
+          static_cast<uint8_t>(AlarmMode::manual),
+          static_cast<uint8_t>(AlarmMode::schoolBell),
+          value)) {
+      sendJson(false, UI_TEXT("Alarm modu geçersiz."), 400);
+      return;
+    }
+    mode = static_cast<AlarmMode>(value);
+  }
+
   AlarmSettings alarms{};
   alarms.schemaVersion = alarmSchemaVersion;
 
@@ -1271,17 +1456,140 @@ void PortalApplication::saveAlarmSettings()
     alarm.customDayMask = dayMask;
   }
 
+  // Older pages send no school bell fields; the stored schedule is kept.
+  SchoolBellSettings school = settings_.schoolBell();
   String validationError;
-  if (!SettingsService::validateAlarms(alarms, validationError)) {
+  if (webServer_.hasArg("schoolLessonCount")
+      && !parseSchoolBellSettings(school, validationError)) {
     sendJson(false, validationError, 400);
     return;
   }
-  if (!settings_.saveAlarms(alarms)) {
+
+  if (!SettingsService::validateAlarms(alarms, validationError)
+      || !SettingsService::validateSchoolBell(school, validationError)) {
+    sendJson(false, validationError, 400);
+    return;
+  }
+  if (!settings_.saveAlarms(alarms)
+      || !settings_.saveSchoolBell(school)
+      || !settings_.saveAlarmMode(mode)) {
     sendJson(false, UI_TEXT("Alarm ayarları flash belleğe kaydedilemedi."), 500);
     return;
   }
 
-  sendJson(true, UI_TEXT("Alarm ayarları kaydedildi."));
+  sendJson(
+    true,
+    mode == AlarmMode::schoolBell
+      ? UI_TEXT("Alarm ayarları kaydedildi. Okul saati etkin.")
+      : UI_TEXT("Alarm ayarları kaydedildi. Manuel alarm etkin."));
+}
+
+bool PortalApplication::parseSchoolBellSettings(
+  SchoolBellSettings &school,
+  String &error) const
+{
+  school = SchoolBellSettings{};
+  String text;
+  if (!postValue("schoolLessonCount", text)
+      || !parseUnsignedByte(text, 0, maximumSchoolLessons, school.lessonCount)) {
+    error = UI_TEXT("Ders sayısı geçersiz.");
+    return false;
+  }
+  for (uint8_t index = 0; index < school.lessonCount; ++index) {
+    char startName[20];
+    char breakName[20];
+    snprintf(startName, sizeof(startName), "lessonStart%u", index);
+    snprintf(breakName, sizeof(breakName), "lessonBreak%u", index);
+    SchoolLesson &lesson = school.lessons[index];
+    lesson.breakMinute = noSchoolBreak;
+    String breakText;
+    if (!postValue(startName, text)
+        || !parseMinuteOfDay(text, lesson.startMinute)
+        || (postValue(breakName, breakText)
+            && !breakText.isEmpty()
+            && !parseMinuteOfDay(breakText, lesson.breakMinute))) {
+      error = UI_TEXT("Eksik veya geçersiz ders saati.");
+      return false;
+    }
+  }
+
+  uint8_t dayMode = 0;
+  if (!postValue("schoolDayMode", text)
+      || !parseUnsignedByte(
+        text,
+        static_cast<uint8_t>(ScheduleDayMode::everyDay),
+        static_cast<uint8_t>(ScheduleDayMode::customDays),
+        dayMode)) {
+    error = UI_TEXT("Okul saati gün seçimi geçersiz.");
+    return false;
+  }
+  school.dayMode = static_cast<ScheduleDayMode>(dayMode);
+  if (school.dayMode == ScheduleDayMode::customDays) {
+    if (!postValue("schoolDayMask", text)
+        || !parseUnsignedByte(text, 1, alarmAllDaysMask, school.customDayMask)) {
+      error = UI_TEXT("Okul saati için en az bir gün seçilmelidir.");
+      return false;
+    }
+  } else {
+    school.customDayMask = school.dayMode == ScheduleDayMode::weekdays
+      ? alarmWeekdaysMask
+      : alarmAllDaysMask;
+  }
+
+  if (!postValue("schoolDuration", text)
+      || !parseUnsigned16(
+        text,
+        minimumAlarmDurationSeconds,
+        maximumAlarmDurationSeconds,
+        school.durationSeconds)) {
+    error = UI_TEXT("Zil süresi 1-3600 saniye olmalıdır.");
+    return false;
+  }
+  if (!postValue("schoolStudentBell", text)
+      || !parseUnsignedByte(
+        text,
+        0,
+        maximumStudentBellLeadMinutes,
+        school.studentBellLeadMinutes)) {
+    error = UI_TEXT("Öğrenci zili en fazla 10 dakika önce çalabilir.");
+    return false;
+  }
+  school.skipPublicHolidays = webServer_.arg("schoolSkipHolidays") == "1";
+  school.remembranceBell = webServer_.arg("schoolRemembrance") == "1";
+
+  if (!postValue("vacationCount", text)
+      || !parseUnsignedByte(text, 0, maximumSchoolVacations, school.vacationCount)) {
+    error = UI_TEXT("Tatil dönemi sayısı geçersiz.");
+    return false;
+  }
+  for (uint8_t index = 0; index < school.vacationCount; ++index) {
+    char startName[20];
+    char endName[20];
+    snprintf(startName, sizeof(startName), "vacationStart%u", index);
+    snprintf(endName, sizeof(endName), "vacationEnd%u", index);
+    String endText;
+    SchoolVacation &vacation = school.vacations[index];
+    if (!postValue(startName, text)
+        || !postValue(endName, endText)
+        || !parseDateKey(text, vacation.firstDate)
+        || !parseDateKey(endText, vacation.lastDate)) {
+      error = UI_TEXT("Tatil dönemi tarihi geçersiz.");
+      return false;
+    }
+  }
+  return true;
+}
+
+void PortalApplication::testAlarmRelay()
+{
+  String text;
+  uint16_t seconds = 0;
+  if (!postValue("seconds", text) || !parseUnsigned16(text, 1, 30, seconds)) {
+    sendJson(false, UI_TEXT("Test süresi 1-30 saniye olmalıdır."), 400);
+    return;
+  }
+  alarm_.testRelay(seconds);
+  sendJson(true, UI_TEXT("Zil test için çalıştırıldı."));
 }
 
 void PortalApplication::saveNetworkSettings()
@@ -1460,7 +1768,7 @@ String PortalApplication::buildSettingsJson()
     sleep.endMinuteOfDay % 60);
 
   String json;
-  json.reserve(1024 + alarms.count * 80);
+  json.reserve(3584 + alarms.count * 80);
   json += F("{\"firmware\":\"");
   json += escapeJson(AppConfig::firmwareVersion);
   json += F("\",\"access\":\"");
@@ -1560,8 +1868,12 @@ String PortalApplication::buildSettingsJson()
     json += alarm.customDayMask;
     json += '}';
   }
+  json += F("]},\"alarmMode\":");
+  json += static_cast<uint8_t>(settings_.alarmMode());
+  json += F(",\"schoolBell\":");
+  appendSchoolBellJson(json);
   // Passwords are write-only: the portal only learns whether one is set.
-  json += F("]},\"wifi\":{\"apSsid\":\"");
+  json += F(",\"wifi\":{\"apSsid\":\"");
   json += escapeJson(network.apSsid);
   json += F("\",\"apPasswordDefault\":");
   json += settings_.usesDefaultApPassword() ? F("true") : F("false");
@@ -1678,6 +1990,10 @@ String PortalApplication::buildContentJson() const
     json += static_cast<uint8_t>(item.scrollArea);
     json += F(",\"decimals\":");
     json += item.valueDecimals;
+    json += F(",\"countdownSeconds\":");
+    json += item.countdownSeconds;
+    json += F(",\"countdownAlarm\":");
+    json += item.countdownAlarmSeconds;
     json += F(",\"text\":\"");
     json += escapeJson(item.text);
     json += F("\",\"valueSource\":");
@@ -1736,6 +2052,178 @@ String PortalApplication::buildTemperatureJson() const
   }
   json += '}';
   return json;
+}
+
+String PortalApplication::buildCountdownJson(const String &message) const
+{
+  static const char *const stateNames[] = {"idle", "running", "paused", "finished"};
+  const ContentSettings &content = settings_.content();
+  String json;
+  json.reserve(160 + content.count * 96);
+  json += F("{\"ok\":true,\"state\":\"");
+  json += stateNames[static_cast<uint8_t>(countdown_.state())];
+  json += F("\",\"elapsedMs\":");
+  json += countdown_.elapsedMs();
+  json += F(",\"alarmActive\":");
+  json += countdown_.alarmActive() ? F("true") : F("false");
+  json += F(",\"message\":\"");
+  json += escapeJson(message);
+  json += F("\",\"items\":[");
+  bool first = true;
+  for (uint8_t index = 0; index < content.count; ++index) {
+    const ContentItemSettings &item = content.items[index];
+    if (!CountdownApplication::isCountdown(item)) {
+      continue;
+    }
+    if (!first) {
+      json += ',';
+    }
+    first = false;
+    char text[16] = {};
+    countdown_.format(item, text, sizeof(text));
+    json += F("{\"index\":");
+    json += index;
+    json += F(",\"panel\":");
+    json += item.panelIndex;
+    json += F(",\"duration\":");
+    json += item.countdownSeconds;
+    json += F(",\"remaining\":");
+    json += countdown_.remainingSeconds(item);
+    json += F(",\"text\":\"");
+    json += text;
+    json += F("\"}");
+  }
+  json += F("]}");
+  return json;
+}
+
+void PortalApplication::appendSchoolBellJson(String &json) const
+{
+  static const char *const stateNames[] = {
+    "schoolDay", "notSchoolDay", "vacation", "publicHoliday", "halfDayHoliday"
+  };
+  static const char *const kindNames[] = {
+    "lesson", "break", "studentCall", "remembrance"
+  };
+  const SchoolBellSettings &school = settings_.schoolBell();
+  char text[16];
+  auto appendTime = [&](uint16_t minute) {
+    snprintf(text, sizeof(text), "%02u:%02u", minute / 60U, minute % 60U);
+    json += text;
+  };
+  auto appendDate = [&](const CalendarDate &date) {
+    snprintf(text, sizeof(text), "%04u-%02u-%02u", date.year, date.month, date.day);
+    json += text;
+  };
+  auto dateFromKey = [](uint32_t key) {
+    return CalendarDate{
+      static_cast<uint16_t>(key / 10000UL),
+      static_cast<uint8_t>((key / 100UL) % 100UL),
+      static_cast<uint8_t>(key % 100UL)
+    };
+  };
+
+  json += F("{\"maximumLessons\":");
+  json += maximumSchoolLessons;
+  json += F(",\"maximumVacations\":");
+  json += maximumSchoolVacations;
+  json += F(",\"dayMode\":");
+  json += static_cast<uint8_t>(school.dayMode);
+  json += F(",\"dayMask\":");
+  json += school.customDayMask;
+  json += F(",\"duration\":");
+  json += school.durationSeconds;
+  json += F(",\"studentBell\":");
+  json += school.studentBellLeadMinutes;
+  json += F(",\"skipHolidays\":");
+  json += school.skipPublicHolidays ? F("true") : F("false");
+  json += F(",\"remembrance\":");
+  json += school.remembranceBell ? F("true") : F("false");
+  json += F(",\"holidaysKnownUntil\":");
+  json += TurkishHolidays::lastReligiousHolidayYear;
+  json += F(",\"lessons\":[");
+  for (uint8_t index = 0; index < school.lessonCount; ++index) {
+    const SchoolLesson &lesson = school.lessons[index];
+    if (index > 0) {
+      json += ',';
+    }
+    json += F("{\"start\":\"");
+    appendTime(lesson.startMinute);
+    json += F("\",\"break\":\"");
+    if (lesson.breakMinute != noSchoolBreak) {
+      appendTime(lesson.breakMinute);
+    }
+    json += F("\"}");
+  }
+  json += F("],\"vacations\":[");
+  for (uint8_t index = 0; index < school.vacationCount; ++index) {
+    const SchoolVacation &vacation = school.vacations[index];
+    if (index > 0) {
+      json += ',';
+    }
+    json += F("{\"start\":\"");
+    appendDate(dateFromKey(vacation.firstDate));
+    json += F("\",\"end\":\"");
+    appendDate(dateFromKey(vacation.lastDate));
+    json += F("\"}");
+  }
+
+  json += F("],\"status\":");
+  if (!clock_.ready()) {
+    json += F("{\"clock\":false}}");
+    return;
+  }
+  const ClockDateTime now = clock_.dateTime();
+  const int32_t today = daysFromCivil(CalendarDate{now.year, now.month, now.day});
+  const uint16_t minute = static_cast<uint16_t>(now.hour * 60U + now.minute);
+  TurkishHolidayInfo holiday;
+  const SchoolDayState state = SchoolBellSchedule::dayState(school, today, holiday);
+  json += F("{\"clock\":true,\"state\":\"");
+  json += stateNames[static_cast<uint8_t>(state)];
+  json += F("\",\"today\":\"");
+  appendDate(civilFromDays(today));
+  json += F("\",\"holiday\":\"");
+  json += escapeJson(TurkishHolidays::name(holiday.holiday));
+  json += F("\",\"holidayHalf\":");
+  json += holiday.halfDay ? F("true") : F("false");
+  json += F(",\"next\":");
+  int32_t bellDay = 0;
+  SchoolBellEvent event;
+  if (SchoolBellSchedule::nextBell(school, today, minute, bellDay, event)) {
+    json += F("{\"date\":\"");
+    appendDate(civilFromDays(bellDay));
+    json += F("\",\"time\":\"");
+    appendTime(event.minuteOfDay);
+    json += F("\",\"kind\":\"");
+    json += kindNames[static_cast<uint8_t>(event.kind)];
+    json += F("\",\"lesson\":");
+    json += event.lesson + 1;
+    json += '}';
+  } else {
+    json += F("null");
+  }
+
+  // Public holiday days of the coming year so the schedule can be checked.
+  json += F(",\"holidays\":[");
+  uint8_t listed = 0;
+  for (int32_t day = today; day < today + 400 && listed < 12; ++day) {
+    const CalendarDate date = civilFromDays(day);
+    const TurkishHolidayInfo info = TurkishHolidays::lookup(date);
+    if (info.holiday == TurkishHoliday::none) {
+      continue;
+    }
+    if (listed++ > 0) {
+      json += ',';
+    }
+    json += F("{\"date\":\"");
+    appendDate(date);
+    json += F("\",\"name\":\"");
+    json += escapeJson(TurkishHolidays::name(info.holiday));
+    json += F("\",\"half\":");
+    json += info.halfDay ? F("true") : F("false");
+    json += '}';
+  }
+  json += F("]}}");
 }
 
 void PortalApplication::appendSensorJson(String &json) const

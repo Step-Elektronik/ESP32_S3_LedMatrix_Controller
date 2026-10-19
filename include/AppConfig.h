@@ -15,7 +15,7 @@
 #endif
 
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "0.10.0"
+#define FIRMWARE_VERSION "0.13.0"
 #endif
 
 namespace AppConfig {
@@ -42,6 +42,24 @@ constexpr uint32_t staAttemptDurationMs = 10000;
 constexpr char portalUser[] = "admin";
 constexpr char portalRealm[] = "STEP-RGB";
 } // namespace Network
+
+namespace OnlineUpdate {
+// GitHub Actions publishes every master build to the "firmware" branch of
+// this repository (.github/workflows/firmware.yml). The repository must be
+// public; the device has no GitHub credentials.
+constexpr char repositoryName[] = "Step-Elektronik/ESP32_S3_LedMatrix_Controller";
+constexpr char repositoryBaseUrl[] =
+  "https://raw.githubusercontent.com/Step-Elektronik/ESP32_S3_LedMatrix_Controller/firmware/";
+constexpr char manifestFile[] = "firmware.json";
+// First automatic check after the STA link is up, then once a day; after a
+// failed check the next try follows sooner.
+constexpr uint32_t firstCheckDelayMs = 2UL * 60UL * 1000UL;
+constexpr uint32_t checkIntervalMs = 24UL * 60UL * 60UL * 1000UL;
+constexpr uint32_t retryIntervalMs = 60UL * 60UL * 1000UL;
+constexpr uint32_t httpTimeoutMs = 15000;
+// A TLS connection needs roughly 40 KB of internal RAM.
+constexpr size_t minimumFreeHeap = 48UL * 1024UL;
+} // namespace OnlineUpdate
 
 namespace TimeSync {
 constexpr char defaultNtpServer[] = "pool.ntp.org";

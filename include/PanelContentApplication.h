@@ -7,6 +7,7 @@
 
 class Adafruit_GFX;
 class ClockApplication;
+class CountdownApplication;
 class PanelDisplay;
 class SettingsService;
 class TemperatureApplication;
@@ -19,6 +20,7 @@ public:
     ClockApplication &clock,
     TemperatureApplication &temperature,
     ValueBoxApplication &valueBoxes,
+    CountdownApplication &countdown,
     SettingsService &settings);
 
   void begin();
@@ -99,12 +101,14 @@ private:
   ClockApplication &clock_;
   TemperatureApplication &temperature_;
   ValueBoxApplication &valueBoxes_;
+  CountdownApplication &countdown_;
   SettingsService &settings_;
   ItemRuntime runtime_[maxContentItems] = {};
   uint8_t lastClockSecond_ = UINT8_MAX;
   uint8_t lastClockDay_ = UINT8_MAX;
   uint32_t lastTemperatureRevision_ = UINT32_MAX;
   uint32_t lastValueBoxRevision_ = UINT32_MAX;
+  uint32_t lastCountdownRevision_ = UINT32_MAX;
   uint32_t renderingPausedAt_ = 0;
   bool renderingPaused_ = false;
   bool ready_ = false;

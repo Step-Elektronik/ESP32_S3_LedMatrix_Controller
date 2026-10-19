@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title description">
   <title id="title">ESP32-S3 RGB LED Matrix Controller sistem mimarisi</title>
-  <desc id="description">Web portalı, kalıcı ayarlar, sensörler, Modbus, içerik motoru, DMA panel sürücüsü, alarm ve panel uyku servisleri arasındaki veri akışı.</desc>
+  <desc id="description">Web portalı, kalıcı ayarlar, sensörler, Modbus, içerik motoru, DMA panel sürücüsü, alarm/geri sayım ve panel uyku servisleri arasındaki veri akışı.</desc>
 
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
@@ -109,7 +109,8 @@
   <text class="label" x="630" y="313">motoru</text>
 
   <rect class="box core" x="540" y="562" width="180" height="56"/>
-  <text class="label" x="630" y="590">Alarm servisi</text>
+  <text class="label" x="630" y="584">Alarm servisi</text>
+  <text class="small" x="630" y="605">Programlı + geri sayım</text>
 
   <rect class="box core" x="540" y="634" width="180" height="56"/>
   <text class="label" x="630" y="662">Panel uyku servisi</text>

@@ -118,7 +118,7 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
     input:focus, select:focus { border-color: #4497ff; box-shadow: 0 0 0 3px rgba(35,129,255,.14); }
     input:disabled, select:disabled { opacity: .4; }
     .segments { display: grid; grid-template-columns: repeat(4,1fr); gap: 7px; }
-    .segments.type-segments { grid-template-columns: repeat(3,1fr); }
+    .segments.type-segments { grid-template-columns: repeat(2,minmax(0,1fr)); }
     .segment:disabled { opacity: .4; cursor: not-allowed; }
     .cycle-choice input:disabled + span { opacity: .4; cursor: not-allowed; }
     .segments.value-source-segments { grid-template-columns: repeat(2,1fr); }
@@ -144,6 +144,20 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
     .cycle-choice input:checked + span { color: #fff; border-color: #438fff; background: rgba(42,126,246,.22); }
     .cycle-badge { position: absolute; left: -8px; top: -10px; min-width: 16px; height: 16px; display: grid; place-items: center; color: #06101d; font: 900 11px/1 sans-serif; border-radius: 999px; background: #62e2c1; box-shadow: 0 2px 7px #000; }
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .three-col { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+    .three-col > div { display: flex; flex-direction: column; justify-content: flex-end; }
+    .countdown-card { margin-bottom: 18px; }
+    .countdown-body { padding: 16px 18px 18px; }
+    .countdown-times { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+    .countdown-time { flex: 1 1 170px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(0,0,0,.22); }
+    .countdown-time span { display: block; color: #8195b2; font-size: 11px; font-weight: 800; }
+    .countdown-time b { display: block; margin-top: 4px; font: 800 clamp(32px,7vw,46px)/1.05 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .countdown-alarm { margin-bottom: 12px; padding: 9px 12px; color: #ffd27a; font-size: 13px; font-weight: 800; border: 1px solid rgba(255,190,70,.35); border-radius: 12px; background: rgba(255,170,30,.12); }
+    .countdown-actions { display: grid; grid-template-columns: repeat(3,1fr); gap: 9px; }
+    .countdown-status { display: block; min-height: 16px; margin-top: 10px; }
+    .panel-pill.running { color: #8ff0c8; background: rgba(40,200,140,.16); }
+    .panel-pill.paused { color: #ffd27a; background: rgba(255,170,30,.14); }
+    .panel-pill.finished { color: #ffb5bd; background: rgba(255,52,77,.14); }
     .range-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
     input[type="range"] { width: 100%; accent-color: #2587ff; }
     .coords { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -158,7 +172,9 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
     html[dir="rtl"] body { direction: rtl; }
     html[dir="rtl"] .stage,
     html[dir="rtl"] input[type="number"],
-    html[dir="rtl"] .coords { direction: ltr; }
+    html[dir="rtl"] .coords,
+    html[dir="rtl"] .countdown-time b { direction: ltr; }
+    html[dir="rtl"] .countdown-time b { text-align: right; }
     html[dir="rtl"] .slider::after { left: auto; right: 3px; }
     html[dir="rtl"] .switch input:checked + .slider::after { transform: translateX(-20px); }
     @media (max-width: 850px) { .layout { grid-template-columns: 1fr; } }
@@ -189,6 +205,23 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
         </a>
       </div>
     </header>
+
+    <section class="card countdown-card" id="countdownCard" aria-labelledby="countdown-title" hidden>
+      <div class="card-head">
+        <div><h2 class="card-title" id="countdown-title">Geri Sayım</h2><p class="card-note">Panele uygulanmış Geri Sayım kutularını başlatın, durdurun veya sıfırlayın</p></div>
+        <span class="panel-pill" id="countdownState">Hazır</span>
+      </div>
+      <div class="countdown-body">
+        <div class="countdown-times" id="countdownTimes"></div>
+        <div class="countdown-alarm" id="countdownAlarmActive" hidden>Süre doldu, alarm rölesi çalışıyor. Durdur veya Sıfırla alarmı susturur.</div>
+        <div class="countdown-actions">
+          <button class="btn primary" id="countdownStart" type="button">Başlat</button>
+          <button class="btn" id="countdownPause" type="button">Durdur</button>
+          <button class="btn danger" id="countdownReset" type="button">Sıfırla</button>
+        </div>
+        <span class="status countdown-status" id="countdownStatus"></span>
+      </div>
+    </section>
 
     <main class="layout">
       <section class="card" aria-labelledby="preview-title">
@@ -229,6 +262,7 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
               <button class="segment" type="button" data-type="2">Tarih</button>
               <button class="segment" type="button" data-type="3">Sıcaklık</button>
               <button class="segment" type="button" data-type="4">Nem</button>
+              <button class="segment" type="button" data-type="5">Geri Sayım</button>
             </div>
             <div class="card-note" id="humidityNote" hidden></div>
           </div>
@@ -236,6 +270,7 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
             <div><span class="field-title">İçerik döngüsü</span><div class="card-note">Birden fazla bilgiyi aynı TextBox'ta sırayla gösterir</div></div>
             <label class="switch"><input id="cycleEnabled" type="checkbox"><span class="slider"></span></label>
           </div>
+          <p class="cycle-note" id="cycleCountdownNote" hidden>Geri sayım içerik döngüsüne eklenemez.</p>
           <div class="cycle-options" id="cycleOptions" hidden>
             <p class="cycle-note">İşaretlenen bilgiler Yazı → Saat → Tarih → Sıcaklık → Nem sırasıyla gösterilir. Kayar yazı açıksa içerik tam turunu tamamladıktan sonra değişir.</p>
             <div class="cycle-choices">
@@ -259,6 +294,22 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
               <option value="1">Tam sayı — yuvarlanmış (24°C, 45%)</option>
             </select>
             <div class="card-note">Tam sayı seçiminde en yakın tam sayıya yuvarlanır; 0.5 ve üzeri bir üst değere çıkar.</div>
+          </div>
+          <div id="countdownOptions" hidden>
+            <div class="field">
+              <span class="field-title">Geri sayım süresi</span>
+              <div class="three-col">
+                <div><label for="durationHours">Saat (0-23)</label><input id="durationHours" type="number" min="0" max="23" step="1" inputmode="numeric"></div>
+                <div><label for="durationMinutes">Dakika (0-59)</label><input id="durationMinutes" type="number" min="0" max="59" step="1" inputmode="numeric"></div>
+                <div><label for="durationSeconds">Saniye (0-59)</label><input id="durationSeconds" type="number" min="0" max="59" step="1" inputmode="numeric"></div>
+              </div>
+              <div class="card-note">Saat 0 ise panelde yalnızca dakika ve saniye (40:00), saat ve dakika 0 ise yalnızca saniye (45) gösterilir.</div>
+            </div>
+            <div class="field">
+              <label for="countdownAlarm">Alarm (röle) süresi — saniye</label>
+              <input id="countdownAlarm" type="number" min="0" max="3600" step="1" inputmode="numeric">
+              <div class="card-note">Süre bittiğinde alarm rölesi bu kadar çalışır; 0 alarmı kapatır. Panele uyguladıktan sonra Başlat, Durdur ve Sıfırla sayfanın üstündeki Geri Sayım kartında görünür.</div>
+            </div>
           </div>
           </div>
           <div id="valueBoxOptions" hidden>
@@ -342,20 +393,44 @@ R"HTML(</span></footer>
       const t = (source, values) => I18n.t(source, values);
       const PW = 32, PH = 16;
       const state = { rows:1, columns:1, maxPerPanel:2, fonts:[], defaultFont:4, fontData:new Map(), fontLoads:new Map(), items:[], selectedPanel:0, selectedId:null, nextId:1, drag:null, temperatureValue:null, humidityValue:null,
-        sensor:{type:1, name:'TMP112', humidity:false, missingText:'TMP?'} };
+        sensor:{type:1, name:'TMP112', humidity:false, missingText:'TMP?'},
+        countdown:{state:'idle', elapsedMs:0, receivedAt:0, alarmActive:false, items:[]} };
       const $ = id => document.getElementById(id);
       const stage = $('stage'), grid = $('panelGrid'), layer = $('itemLayer');
       const status = $('status'), addTextButton = $('addTextBox'), addValueButton = $('addValueBox'), saveButton = $('saveAll');
-      const typeNames = ['Yazı','Saat','Tarih','Sıcaklık','Nem'];
+      const typeNames = ['Yazı','Saat','Tarih','Sıcaklık','Nem','Geri Sayım'];
       const humidityMask = 1<<4;
+      const countdownType = 5, defaultCountdownSeconds = 40*60, defaultCountdownAlarm = 10, maximumCountdownSeconds = 23*3600+59*60+59;
+      const countdownStateNames = {idle:'Hazır', running:'Sayıyor', paused:'Durduruldu', finished:'Süre doldu'};
+      const countdownStatus = $('countdownStatus');
       const boxNames = ['TextBox','ValueBox'];
       const directionArrows = ['←','→','↑','↓'];
 
-      function setStatus(message, kind='', values={}) {
-        status.dataset.i18nSource = message;
-        status.dataset.i18nValues = JSON.stringify(values);
-        status.textContent = t(message, values);
-        status.className = 'status' + (kind ? ' ' + kind : '');
+      function setStatus(message, kind='', values={}, element=status) {
+        element.dataset.i18nSource = message;
+        element.dataset.i18nValues = JSON.stringify(values);
+        element.textContent = t(message, values);
+        element.className = 'status' + (element===countdownStatus ? ' countdown-status' : '') + (kind ? ' ' + kind : '');
+      }
+      function retranslateStatus(element) {
+        const source=element.dataset.i18nSource;
+        if(!source) return;
+        let values={};
+        try { values=JSON.parse(element.dataset.i18nValues||'{}'); } catch (_) {}
+        element.textContent=t(source,values);
+      }
+      function countdownElapsed() {
+        const session=state.countdown;
+        return session.state==='running' ? session.elapsedMs+Math.max(0,Date.now()-session.receivedAt) : session.elapsedMs;
+      }
+      // Mirrors CountdownApplication::format on the device: the configured
+      // duration decides whether hours and minutes are shown.
+      function formatCountdown(duration,elapsedMs) {
+        const remaining=Math.max(0,Math.ceil((duration*1000-elapsedMs)/1000));
+        const two=value=>String(value).padStart(2,'0'), seconds=remaining%60;
+        if(duration>=3600) return Math.floor(remaining/3600)+':'+two(Math.floor(remaining/60)%60)+':'+two(seconds);
+        if(duration>=60) return two(Math.floor(remaining/60))+':'+two(seconds);
+        return two(seconds);
       }
       function width() { return state.columns * PW; }
       function height() { return state.rows * PH; }
@@ -383,6 +458,7 @@ R"HTML(</span></footer>
           const rounded=value<0?-Math.round(-value):Math.round(value);
           return (item.temperatureFormat===1?String(rounded):value.toFixed(1))+'°C';
         }
+        if (type === countdownType) return formatCountdown(Number(item.countdownSeconds)||0,countdownElapsed());
         if (type === 4) {
           if (!state.sensor.humidity) return '--%';
           if (!Number.isFinite(state.humidityValue)) return state.sensor.missingText;
@@ -674,7 +750,8 @@ R"HTML(</span></footer>
           cycleInterval:5, _cycleStartedAt:Date.now(), text:'YAZI', initialValue:0,
           valueSource:0, registerAddress:nextRegisterAddress(), valueType:0,
           counterDirection:0, temperatureFormat:0, font:state.defaultFont,
-          scrollArea:0, decimals:0, suffix:'', currentRaw:0 };
+          scrollArea:0, decimals:0, suffix:'', currentRaw:0,
+          countdownSeconds:defaultCountdownSeconds, countdownAlarm:defaultCountdownAlarm };
         state.items.push(item); state.selectedId=item.id;
         renderStage(); syncEditor(); setStatus('Yeni {box} eklendi.','',{box:boxNames[kind]});
       }
@@ -703,8 +780,17 @@ R"HTML(</span></footer>
         $('humidityNote').hidden=state.sensor.humidity;
         $('humidityNote').textContent=t('Seçili sensör ({sensor}) nem ölçmez. Sensör, Ayarlar → Sıcaklık Sensörü bölümünden değiştirilebilir.',{sensor:state.sensor.name});
         const cycleUsesText=item.cycleEnabled && (item.cycleMask&1)!==0;
+        const isCountdown=!item.cycleEnabled && item.type===countdownType;
         $('textValue').value=item.text; $('textValue').disabled=item.cycleEnabled?!cycleUsesText:item.type!==0;
         $('cycleEnabled').checked=item.cycleEnabled;
+        $('cycleEnabled').disabled=isCountdown;
+        $('cycleCountdownNote').hidden=!isCountdown;
+        $('countdownOptions').hidden=!isCountdown;
+        const duration=Number(item.countdownSeconds)||0;
+        $('durationHours').value=Math.floor(duration/3600);
+        $('durationMinutes').value=Math.floor(duration/60)%60;
+        $('durationSeconds').value=duration%60;
+        $('countdownAlarm').value=item.countdownAlarm;
         $('cycleOptions').hidden=!item.cycleEnabled;
         document.querySelectorAll('[data-cycle-type]').forEach(input => {
           input.checked=(item.cycleMask&(1<<Number(input.dataset.cycleType)))!==0;
@@ -741,8 +827,26 @@ R"HTML(</span></footer>
 
       document.querySelectorAll('[data-type]').forEach(button => button.addEventListener('click',() => {
         const item=selectedItem(); if (!item) return;
-        item.type=Number(button.dataset.type); item.cycleMask=1<<item.type; item._cycleStartedAt=Date.now(); syncEditor(); renderStage(); setStatus('Veri türü değişti.');
+        item.type=Number(button.dataset.type);
+        // A countdown never cycles; its mask stays at the plain text bit.
+        item.cycleMask=item.type===countdownType?1:1<<item.type;
+        if(item.type===countdownType) item.cycleEnabled=false;
+        item._cycleStartedAt=Date.now(); syncEditor(); renderStage(); setStatus('Veri türü değişti.');
       }));
+      function updateCountdownDuration() {
+        const item=selectedItem(); if(!item||item.kind!==0) return;
+        const part=(id,max)=>Math.max(0,Math.min(max,Math.trunc(Number($(id).value))||0));
+        item.countdownSeconds=part('durationHours',23)*3600+part('durationMinutes',59)*60+part('durationSeconds',59);
+        renderStage();
+      }
+      ['durationHours','durationMinutes','durationSeconds'].forEach(id => {
+        $(id).addEventListener('input',updateCountdownDuration);
+        $(id).addEventListener('change',() => { updateCountdownDuration(); syncEditor(); setStatus('Geri sayım süresi değişti.'); });
+      });
+      $('countdownAlarm').addEventListener('input',event => {
+        const item=selectedItem(); if(!item||item.kind!==0) return;
+        item.countdownAlarm=Number(event.target.value);
+      });
       $('cycleEnabled').addEventListener('change',event => {
         const item=selectedItem(); if(!item) return;
         item.cycleEnabled=event.target.checked;
@@ -839,6 +943,8 @@ R"HTML(</span></footer>
               // ValueBoxes store their unit suffix in the text field.
               text:kind===1?'YAZI':String(item.text||''),suffix:kind===1?String(item.text||''):'',
               currentRaw:item.currentRaw===null||item.currentRaw===undefined?null:Number(item.currentRaw),
+              countdownSeconds:Number(item.countdownSeconds)||defaultCountdownSeconds,
+              countdownAlarm:Number.isFinite(Number(item.countdownAlarm))?Number(item.countdownAlarm):defaultCountdownAlarm,
               _cycleStartedAt:Date.now(),id:state.nextId++};
           });
           const requiredFonts=new Set([state.defaultFont,...state.items.map(item=>item.font)]);
@@ -871,6 +977,10 @@ R"HTML(</span></footer>
             if (utf8Length(item.text)>47) { selectItem(item.id); setStatus('Metin en fazla 47 bayt olabilir.','error'); return; }
             if (item.cycleEnabled && !item.cycleMask) { selectItem(item.id); setStatus('Döngü için en az bir bilgi seçilmelidir.','error'); return; }
             if (item.cycleEnabled && (!Number.isInteger(item.cycleInterval)||item.cycleInterval<1||item.cycleInterval>3600)) { selectItem(item.id); setStatus('Değişim sıklığı 1-3600 saniye olmalıdır.','error'); return; }
+            if (!item.cycleEnabled && item.type===countdownType) {
+              if (!Number.isInteger(item.countdownSeconds)||item.countdownSeconds<1||item.countdownSeconds>maximumCountdownSeconds) { selectItem(item.id); setStatus('Geri sayım süresi 1 saniye ile 23:59:59 arasında olmalıdır.','error'); return; }
+              if (!Number.isInteger(item.countdownAlarm)||item.countdownAlarm<0||item.countdownAlarm>3600) { selectItem(item.id); setStatus('Geri sayım alarm süresi 0-3600 saniye olmalıdır.','error'); return; }
+            }
             continue;
           }
 
@@ -892,23 +1002,72 @@ R"HTML(</span></footer>
           itemColor(item).slice(1).toUpperCase(),item.scrolling?1:0,item.direction,item.speed,
           encodeURIComponent((item.kind===1?item.suffix:item.text)||''),item.cycleEnabled?1:0,item.cycleMask,item.cycleInterval,
           item.kind,Number(item.initialValue)||0,item.valueSource,item.registerAddress,item.valueType,
-          item.counterDirection,item.temperatureFormat,item.font,item.scrollArea,item.kind===1?item.decimals:0].join('|')).join('\n');
+          item.counterDirection,item.temperatureFormat,item.font,item.scrollArea,item.kind===1?item.decimals:0,
+          item.kind===0?item.countdownSeconds:defaultCountdownSeconds,item.kind===0?item.countdownAlarm:defaultCountdownAlarm].join('|')).join('\n');
         saveButton.disabled=true; setStatus('Panele uygulanıyor…');
         try { await request('/api/content',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:records}); setStatus('İçerik panele uygulandı ve flash belleğe kaydedildi.','ok'); }
         catch(error) { setStatus(error.message,'error'); }
         finally { saveButton.disabled=false; }
+        loadCountdown();
       }
+
+      let countdownTimer=0, countdownBusy=false;
+      function renderCountdown() {
+        const session=state.countdown, card=$('countdownCard');
+        card.hidden=!session.items.length;
+        if(!session.items.length) return;
+        const elapsed=countdownElapsed(), times=$('countdownTimes');
+        times.replaceChildren();
+        session.items.forEach(item => {
+          const box=document.createElement('div'); box.className='countdown-time';
+          const label=document.createElement('span');
+          label.textContent=t('Panel {number}',{number:item.panel+1})+' • '+formatCountdown(item.duration,0);
+          const value=document.createElement('b'); value.textContent=formatCountdown(item.duration,elapsed);
+          box.append(label,value); times.appendChild(box);
+        });
+        const pill=$('countdownState');
+        pill.textContent=t(countdownStateNames[session.state]||countdownStateNames.idle);
+        pill.className='panel-pill '+session.state;
+        $('countdownAlarmActive').hidden=!session.alarmActive;
+        $('countdownStart').textContent=session.state==='paused'?t('Devam Et'):session.state==='finished'?t('Yeniden Başlat'):t('Başlat');
+        $('countdownStart').disabled=countdownBusy||session.state==='running';
+        $('countdownPause').disabled=countdownBusy||(session.state!=='running'&&!session.alarmActive);
+        $('countdownReset').disabled=countdownBusy||(session.state==='idle'&&!session.alarmActive);
+      }
+      function applyCountdown(data) {
+        state.countdown={state:String(data.state||'idle'),elapsedMs:Number(data.elapsedMs)||0,receivedAt:Date.now(),
+          alarmActive:Boolean(data.alarmActive),
+          items:Array.isArray(data.items)?data.items.map(item=>({panel:Number(item.panel)||0,duration:Number(item.duration)||0})):[]};
+        renderCountdown();
+      }
+      async function loadCountdown() {
+        clearTimeout(countdownTimer);
+        try { applyCountdown(await request('/api/countdown')); }
+        catch(error) { /* The next poll retries. */ }
+        // Poll only while the applied design has a countdown.
+        if(state.countdown.items.length) countdownTimer=setTimeout(loadCountdown,1000);
+      }
+      async function controlCountdown(action) {
+        if(action==='reset' && (state.countdown.state==='running'||state.countdown.state==='paused')
+            && !confirm(t('Geri sayım sıfırlansın mı? Geçen süre silinir.'))) return;
+        countdownBusy=true; renderCountdown();
+        try {
+          const data=await request('/api/countdown',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'action='+action});
+          applyCountdown(data); setStatus(data.message,'ok',{},countdownStatus);
+        } catch(error) { setStatus(error.message,'error',{},countdownStatus); }
+        finally { countdownBusy=false; renderCountdown(); loadCountdown(); }
+      }
+      $('countdownStart').addEventListener('click',()=>controlCountdown('start'));
+      $('countdownPause').addEventListener('click',()=>controlCountdown('pause'));
+      $('countdownReset').addEventListener('click',()=>controlCountdown('reset'));
       saveButton.addEventListener('click',saveContent);
       window.addEventListener('resize',renderStage);
       I18n.onChange(() => {
         renderStage();
         syncEditor();
-        const source=status.dataset.i18nSource;
-        if(source) {
-          let values={};
-          try { values=JSON.parse(status.dataset.i18nValues||'{}'); } catch (_) {}
-          status.textContent=t(source,values);
-        }
+        renderCountdown();
+        retranslateStatus(status);
+        retranslateStatus(countdownStatus);
       });
       setInterval(() => {
         if(state.drag) return;
@@ -921,7 +1080,10 @@ R"HTML(</span></footer>
           renderPreviewNode(node,item,sx,sy);
         });
       },1000);
+      // Between polls the remaining time is estimated locally.
+      setInterval(() => { if(state.countdown.state==='running') renderCountdown(); },250);
       loadContent();
+      loadCountdown();
       loadTemperature();
       setInterval(loadTemperature, 2000);
     })();
@@ -1102,6 +1264,40 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
     .alarm-day-choice input:checked + span {
       color: #fff; border-color: #438fff; background: rgba(42,126,246,.22);
     }
+    .mode-choices { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-bottom: 20px; }
+    .mode-choice { position: relative; }
+    .mode-choice input { position: absolute; opacity: 0; pointer-events: none; }
+    .mode-choice > span {
+      display: grid; gap: 4px; min-height: 66px; align-content: center; padding: 11px 14px;
+      color: #9fb2cc; cursor: pointer; border: 1px solid rgba(255,255,255,.12);
+      border-radius: 14px; background: #0a1829;
+    }
+    .mode-choice strong { font-size: 14px; }
+    .mode-choice small { color: #8195b2; font-size: 12px; line-height: 1.35; }
+    .mode-choice input:checked + span {
+      color: #fff; border-color: #398cff; background: rgba(42,126,243,.19);
+      box-shadow: 0 0 0 2px rgba(57,140,255,.12);
+    }
+    .mode-choice input:focus-visible + span { outline: 2px solid #4b98ff; outline-offset: 2px; }
+    .subsection-title { margin: 26px 0 6px; color: #e7f0fc; font-size: 16px; }
+    .subsection-title + .sleep-hint { margin-bottom: 14px; }
+    .lesson-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+    .lesson-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
+    .link-button {
+      min-height: 34px; padding: 6px 11px; color: #a9cdff; cursor: pointer;
+      border: 1px dashed rgba(80,151,255,.45); border-radius: 9px; background: transparent; font-weight: 800;
+    }
+    .lesson-info { margin: 10px 0 0; color: #91a5c2; font-size: 12px; line-height: 1.45; }
+    .lesson-info:empty { display: none; }
+    .lesson-info.error { color: #ff9aa6; }
+    .sleep-toggle .toggle-note { display: block; margin-top: 3px; color: #ffd27a; font-size: 12px; font-weight: 700; }
+    .holiday-list {
+      grid-column: 1 / -1; display: grid; gap: 7px; margin: 0; padding: 12px 14px; list-style: none;
+      color: #b8c9df; font-size: 12px; border: 1px solid rgba(255,255,255,.10); border-radius: 12px; background: #0a1829;
+    }
+    .holiday-list li { display: flex; justify-content: space-between; gap: 12px; }
+    .holiday-list time { flex: 0 0 auto; color: #e7f0fc; font-weight: 800; }
+    .holiday-list .holiday-title { color: #8195b2; font-weight: 800; }
     .tests { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
     .test-red { background: #da3042; }
     .test-green { background: #159b57; }
@@ -1123,6 +1319,17 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
     }
     .connection-card .tip { fill: currentColor; stroke: none; }
     .connection-name { display: block; min-height: 30px; margin-top: 4px; font-size: 11px; font-weight: 800; line-height: 1.25; }
+    .tab-badge {
+      display: inline-block; margin-inline-start: 7px; padding: 2px 7px; color: #06101d;
+      font-size: 11px; font-weight: 900; vertical-align: middle; border-radius: 999px; background: #ffd27a;
+    }
+    .update-offer {
+      display: grid; gap: 6px; margin: 0 0 14px; padding: 13px 15px;
+      border: 1px solid rgba(255,190,70,.35); border-radius: 13px; background: rgba(255,170,30,.10);
+    }
+    .update-offer strong { color: #ffe7b8; font-size: 14px; }
+    .online-update { margin-bottom: 6px; }
+    .online-update .firmware-progress { margin: 0 0 14px; }
     .firmware-card {
       display: grid; gap: 16px; padding: 18px;
       border: 1px solid rgba(255,255,255,.11); border-radius: 15px;
@@ -1166,6 +1373,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
     html[dir="rtl"] input[type="time"],
     html[dir="rtl"] input[type="date"],
     html[dir="rtl"] code,
+    html[dir="rtl"] .holiday-list time,
     html[dir="rtl"] .connection-card svg { direction: ltr; }
     @media (max-width: 650px) {
       .shell { padding: 16px 12px 34px; }
@@ -1180,6 +1388,8 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
       .wifi-ip { grid-column: 2; justify-self: start; }
       .alarm-fields { grid-template-columns: 1fr; }
       .alarm-day-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      .lesson-fields { grid-template-columns: 1fr; }
+      .holiday-list li { flex-direction: column; gap: 2px; }
     }
   </style>
 </head>
@@ -1200,7 +1410,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
       <button class="tab" data-target="alarm">Alarm Ayarları</button>
       <button class="tab" data-target="communication">Haberleşme Ayarları</button>
       <button class="tab" data-target="wifi">Wi-Fi Ayarları</button>
-      <button class="tab" data-target="firmware">Yazılım Güncelleme</button>
+      <button class="tab" data-target="firmware">Yazılım Güncelleme<span class="tab-badge" id="firmware-tab-badge" hidden>Yeni</span></button>
     </nav>
 
     <section class="panel active" id="panel-section">
@@ -1420,13 +1630,79 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
 
     <section class="panel" id="alarm-section">
       <h2>Alarm Ayarları</h2>
-      <p class="note">Alarm tetiklendiğinde IO42 rölesi belirlenen süre boyunca açık kalır. En fazla 10 alarm oluşturabilirsiniz.</p>
+      <p class="note">IO42 alarm rölesi manuel alarmlarla veya okul saati programıyla çalışır. Aynı anda yalnızca biri etkindir; diğerinin ayarları saklanır.</p>
       <form id="alarm-form">
-        <div class="alarm-summary"><strong id="alarm-count">0 / 10 alarm</strong><span>Süre: 1–3600 saniye</span></div>
-        <p class="alarm-empty" id="alarm-empty">Henüz alarm oluşturulmadı.</p>
-        <div class="alarm-list" id="alarm-list"></div>
+        <div class="mode-choices" role="radiogroup" aria-label="Alarm modu">
+          <label class="mode-choice"><input type="radio" name="alarmMode" value="0" checked><span><strong>Manuel alarm</strong><small>Belirlediğiniz saatlerde çalan en fazla 10 alarm</small></span></label>
+          <label class="mode-choice"><input type="radio" name="alarmMode" value="1"><span><strong>Okul saati</strong><small>Ders ve teneffüs zilleri, resmi tatiller ve tatil dönemleri</small></span></label>
+        </div>
+
+        <div id="manual-alarm-panel">
+          <p class="note">Alarm tetiklendiğinde IO42 rölesi belirlenen süre boyunca açık kalır. En fazla 10 alarm oluşturabilirsiniz.</p>
+          <div class="alarm-summary"><strong id="alarm-count">0 / 10 alarm</strong><span>Süre: 1–3600 saniye</span></div>
+          <p class="alarm-empty" id="alarm-empty">Henüz alarm oluşturulmadı.</p>
+          <div class="alarm-list" id="alarm-list"></div>
+          <div class="actions"><button class="button secondary" id="add-alarm" type="button">Yeni Alarm Ekle</button></div>
+        </div>
+
+        <div id="school-bell-panel" hidden>
+          <div class="wifi-connection" id="school-status" data-state="waiting" role="status" aria-live="polite">
+            <span class="wifi-dot" aria-hidden="true"></span>
+            <span class="wifi-copy">
+              <strong id="school-status-label">Okul saati durumu alınıyor</strong>
+              <span id="school-status-detail">Lütfen bekleyin…</span>
+            </span>
+          </div>
+          <div class="grid">
+            <fieldset>
+              <legend>Genel ayarlar</legend>
+              <div class="field"><label for="schoolDayMode">Çalışma günleri</label><select id="schoolDayMode"><option value="0">Haftanın her günü</option><option value="1">Sadece hafta içi</option><option value="2">İstediğim günler</option></select></div>
+              <div class="field"><label for="schoolDuration">Zil süresi (saniye)</label><input id="schoolDuration" type="number" min="1" max="3600" step="1" inputmode="numeric"></div>
+              <div class="alarm-custom-days" id="school-custom-days" hidden>
+                <p class="sleep-hint">Okul zilinin çalışacağı günleri seçin.</p>
+                <div class="alarm-day-grid">
+                  <label class="alarm-day-choice"><input type="checkbox" data-school-day="0"><span>Pazartesi</span></label>
+                  <label class="alarm-day-choice"><input type="checkbox" data-school-day="1"><span>Salı</span></label>
+                  <label class="alarm-day-choice"><input type="checkbox" data-school-day="2"><span>Çarşamba</span></label>
+                  <label class="alarm-day-choice"><input type="checkbox" data-school-day="3"><span>Perşembe</span></label>
+                  <label class="alarm-day-choice"><input type="checkbox" data-school-day="4"><span>Cuma</span></label>
+                  <label class="alarm-day-choice"><input type="checkbox" data-school-day="5"><span>Cumartesi</span></label>
+                  <label class="alarm-day-choice"><input type="checkbox" data-school-day="6"><span>Pazar</span></label>
+                </div>
+              </div>
+              <div class="field full"><label for="schoolStudentBell">Öğrenci zili</label><select id="schoolStudentBell"></select></div>
+              <p class="sleep-hint">Öğrenci zili, öğrencileri sınıfa çağırmak için her dersten önce ek bir zil çalar; ders başlangıç zili öğretmen zili olarak çalmaya devam eder. Bütün ziller aynı zil süresini kullanır.</p>
+              <label class="sleep-toggle" for="schoolSkipHolidays">
+                <input id="schoolSkipHolidays" type="checkbox" value="1">
+                <span>Resmi tatillerde zil çalmasın<small class="toggle-note">Yalnızca Türkiye'deki resmi tatiller</small></span>
+              </label>
+              <p class="sleep-hint">Ulusal bayramlarda, 1 Ocak, 1 Mayıs ve 15 Temmuz'da, Ramazan ve Kurban bayramlarında zil çalmaz. Bayram arifelerinde ve 28 Ekim'de saat 13:00'ten sonra zil çalmaz.</p>
+              <ul class="holiday-list" id="holiday-list" hidden></ul>
+              <p class="sleep-hint" id="holiday-range"></p>
+              <label class="sleep-toggle" for="schoolRemembrance">
+                <input id="schoolRemembrance" type="checkbox" value="1">
+                <span>10 Kasım'da saat 09:05'te saygı duruşu zili çal</span>
+              </label>
+            </fieldset>
+          </div>
+
+          <h3 class="subsection-title">Ders programı</h3>
+          <p class="sleep-hint">Dersleri saat sırasıyla ekleyin. Her dersin altına teneffüs zilini ekleyebilirsiniz; son dersin teneffüs zili okul çıkış zili olarak kullanılabilir. İkili öğretimde sabahçı ve öğlenci derslerini aynı listeye sırayla ekleyin.</p>
+          <div class="alarm-summary"><strong id="lesson-count">0 / 20 ders</strong><span>Yeni ders, önceki teneffüsten 10 dakika sonra önerilir</span></div>
+          <p class="alarm-empty" id="lesson-empty">Henüz ders eklenmedi.</p>
+          <div class="alarm-list" id="lesson-list"></div>
+          <div class="actions"><button class="button secondary" id="add-lesson" type="button">Ders Ekle</button></div>
+
+          <h3 class="subsection-title">Tatil dönemleri</h3>
+          <p class="sleep-hint">Yaz tatili, yarıyıl tatili, ara tatiller veya idari izin gibi okulun kapalı olduğu günleri ekleyin; bu günlerde zil çalmaz. Başlangıç ve bitiş günleri dahildir.</p>
+          <div class="alarm-summary"><strong id="vacation-count">0 / 10 tatil dönemi</strong></div>
+          <p class="alarm-empty" id="vacation-empty">Henüz tatil dönemi eklenmedi.</p>
+          <div class="alarm-list" id="vacation-list"></div>
+          <div class="actions"><button class="button secondary" id="add-vacation" type="button">Tatil Dönemi Ekle</button></div>
+        </div>
+
         <div class="actions">
-          <button class="button secondary" id="add-alarm" type="button">Yeni Alarm Ekle</button>
+          <button class="button secondary" id="test-bell" type="button">Zili Test Et</button>
           <button class="button" type="submit">Alarm Ayarlarını Kaydet</button>
         </div>
       </form>
@@ -1505,7 +1781,40 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
 
     <section class="panel" id="firmware-section">
       <h2>Yazılım Güncelleme</h2>
-      <p class="note">Bilgisayarınızdan veya telefonunuzdan OTA firmware dosyasını seçin. Yükleme tamamlandığında cihaz otomatik olarak yeniden başlar.</p>
+      <p class="note">Yeni sürümü GitHub üzerinden çevrimiçi kurabilir veya firmware.bin dosyasını bilgisayarınızdan ya da telefonunuzdan yükleyebilirsiniz. Kurulumdan sonra cihaz otomatik olarak yeniden başlar.</p>
+
+      <div class="online-update">
+        <h3 class="subsection-title">Çevrimiçi güncelleme</h3>
+        <p class="sta-warning" id="online-update-rollback" role="alert" hidden></p>
+        <div class="wifi-connection" id="online-update-status" data-state="waiting" role="status" aria-live="polite">
+          <span class="wifi-dot" aria-hidden="true"></span>
+          <span class="wifi-copy">
+            <strong id="online-update-label">Güncelleme durumu alınıyor</strong>
+            <span id="online-update-detail">Lütfen bekleyin…</span>
+          </span>
+          <code class="wifi-ip" id="online-update-version" hidden></code>
+        </div>
+        <div class="update-offer" id="online-update-offer" hidden>
+          <strong id="online-update-title"></strong>
+          <p class="firmware-meta" id="online-update-notes"></p>
+        </div>
+        <div class="firmware-progress" id="online-update-progress" hidden>
+          <div class="firmware-progress-track" role="progressbar" aria-label="Çevrimiçi güncelleme ilerlemesi" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="online-update-track"><span class="firmware-progress-bar" id="online-update-bar"></span></div>
+          <output class="firmware-progress-value" id="online-update-value">0%</output>
+        </div>
+        <label class="sleep-toggle" for="onlineUpdateAuto">
+          <input id="onlineUpdateAuto" type="checkbox" value="1">
+          Güncellemeleri otomatik denetle (günde bir kez)
+        </label>
+        <p class="sleep-hint">Cihaz STA ağı üzerinden internete bağlıyken GitHub üzerinde yayınlanan son firmware'i denetler. Yeni sürüm yalnızca siz onayladığınızda indirilip kurulur. Yeni firmware ilk 60 saniye içinde kapanır veya yeniden başlarsa cihaz önceki sürüme döner.</p>
+        <p class="sleep-hint">Kaynak: <code id="online-update-repository">—</code></p>
+        <div class="actions">
+          <button class="button secondary" id="online-update-check" type="button">Şimdi Denetle</button>
+          <button class="button" id="online-update-install" type="button" hidden>Güncelle</button>
+        </div>
+      </div>
+
+      <h3 class="subsection-title">Dosyadan güncelleme</h3>
       <form id="firmware-form">
         <div class="firmware-card">
           <div class="field">
@@ -1553,7 +1862,7 @@ R"HTML(</footer>
     let maximumAlarms = 10;
 
     function refreshAlarmList() {
-      const cards = [...document.querySelectorAll('.alarm-card')];
+      const cards = [...document.querySelectorAll('#alarm-list .alarm-card')];
       cards.forEach((card, index) => {
         card.querySelector('.alarm-title').textContent = t('Alarm {number}', {number:index + 1});
         card.querySelector('.alarm-time').name = `alarmTime${index}`;
@@ -1658,6 +1967,398 @@ R"HTML(</footer>
       items.slice(0, maximumAlarms).forEach(addAlarm);
       refreshAlarmList();
     }
+
+    let maximumLessons = 20;
+    let maximumVacations = 10;
+    let holidaysKnownUntil = 2035;
+    let savedAlarmMode = 0;
+    let schoolStatusData = null;
+    const studentBellChoices = [0, 1, 2, 3, 4, 5, 10];
+    const pad2 = value => String(value).padStart(2, '0');
+    const timeText = minutes => `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}`;
+    function minutesOf(text) {
+      const match = /^(\d{1,2}):(\d{2})/.exec(text || '');
+      return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+    }
+
+    function selectedAlarmMode() {
+      const checked = document.querySelector('input[name="alarmMode"]:checked');
+      return checked ? Number(checked.value) : 0;
+    }
+
+    function updateAlarmMode() {
+      const school = selectedAlarmMode() === 1;
+      byId('manual-alarm-panel').hidden = school;
+      byId('school-bell-panel').hidden = !school;
+    }
+
+    function schoolDayMask() {
+      return [...document.querySelectorAll('[data-school-day]')].reduce(
+        (mask, input) => input.checked ? mask | (1 << Number(input.dataset.schoolDay)) : mask,
+        0);
+    }
+
+    function updateSchoolDayControls() {
+      byId('school-custom-days').hidden = Number(byId('schoolDayMode').value) !== 2;
+    }
+
+    function renderStudentBellOptions(value = Number(byId('schoolStudentBell').value) || 0) {
+      const select = byId('schoolStudentBell');
+      const choices = studentBellChoices.includes(value)
+        ? studentBellChoices
+        : [...studentBellChoices, value].sort((a, b) => a - b);
+      select.replaceChildren(...choices.map(minutes => {
+        const option = document.createElement('option');
+        option.value = String(minutes);
+        option.textContent = minutes ? t('Dersten {minutes} dakika önce', {minutes}) : t('Kapalı');
+        return option;
+      }));
+      select.value = String(value);
+    }
+
+    function lessonCards() {
+      return [...document.querySelectorAll('.lesson-card')];
+    }
+
+    function lessonTimes(card) {
+      const hasBreak = !card.querySelector('.lesson-break-field').hidden;
+      return {
+        start: minutesOf(card.querySelector('.lesson-start').value),
+        hasBreak,
+        end: hasBreak ? minutesOf(card.querySelector('.lesson-break').value) : null
+      };
+    }
+
+    // Shows the lesson and break lengths so wrong times stand out at once.
+    function refreshLessons() {
+      const cards = lessonCards();
+      cards.forEach((card, index) => {
+        card.querySelector('.alarm-title').textContent = t('{number}. Ders', {number:index + 1});
+        const lesson = lessonTimes(card);
+        card.querySelector('.lesson-add-break').hidden = lesson.hasBreak;
+        card.querySelector('.lesson-remove-break').hidden = !lesson.hasBreak;
+        const next = cards[index + 1] ? lessonTimes(cards[index + 1]).start : null;
+        const parts = [];
+        let error = false;
+        if (lesson.start !== null && lesson.end !== null) {
+          if (lesson.end > lesson.start) {
+            parts.push(t('Ders {minutes} dk', {minutes:lesson.end - lesson.start}));
+          } else {
+            parts.push(t('Teneffüs zili ders başlangıcından sonra olmalıdır.'));
+            error = true;
+          }
+          if (next === null) parts.push(t('Bu teneffüs zili okul çıkış zili olarak çalar.'));
+          else if (next > lesson.end) parts.push(t('Teneffüs {minutes} dk', {minutes:next - lesson.end}));
+          else {
+            parts.push(t('Sonraki ders teneffüs zilinden sonra başlamalıdır.'));
+            error = true;
+          }
+        } else if (lesson.start !== null && next !== null && next <= lesson.start) {
+          parts.push(t('Sonraki ders bu dersten sonra başlamalıdır.'));
+          error = true;
+        }
+        const info = card.querySelector('.lesson-info');
+        info.textContent = parts.join(' • ');
+        info.classList.toggle('error', error);
+      });
+      byId('lesson-count').textContent = t('{count} / {maximum} ders', {count:cards.length,maximum:maximumLessons});
+      byId('lesson-empty').hidden = cards.length !== 0;
+      byId('add-lesson').disabled = cards.length >= maximumLessons;
+    }
+
+    function addLesson(item = null) {
+      const list = byId('lesson-list');
+      if (list.children.length >= maximumLessons) {
+        showStatus(t('En fazla {maximum} ders eklenebilir.', {maximum:maximumLessons}), true);
+        return;
+      }
+
+      const card = document.createElement('div');
+      card.className = 'alarm-card lesson-card';
+      card.innerHTML = `
+        <div class="alarm-card-head">
+          <strong class="alarm-title">Ders</strong>
+          <button class="alarm-remove" type="button">Sil</button>
+        </div>
+        <div class="lesson-fields">
+          <div class="field"><label>Ders başlangıcı</label><input class="lesson-start" type="time" step="60"></div>
+          <div class="field lesson-break-field" hidden><label>Teneffüs zili (ders bitişi)</label><input class="lesson-break" type="time" step="60"></div>
+        </div>
+        <div class="lesson-actions">
+          <button class="link-button lesson-add-break" type="button">+ Teneffüs Ekle</button>
+          <button class="link-button lesson-remove-break" type="button" hidden>Teneffüsü Kaldır</button>
+        </div>
+        <p class="lesson-info"></p>`;
+
+      let start = item && item.start ? item.start : '';
+      const breakTime = item && item.break ? item.break : '';
+      if (!item) {
+        // Suggest the next lesson 10 minutes after the previous break bell.
+        const cards = lessonCards();
+        const previous = cards.length ? lessonTimes(cards[cards.length - 1]) : null;
+        let minutes = 8 * 60 + 30;
+        if (previous && previous.end !== null) minutes = previous.end + 10;
+        else if (previous && previous.start !== null) minutes = previous.start + 50;
+        start = timeText(Math.min(minutes, 23 * 60 + 59));
+      }
+      card.querySelector('.lesson-start').value = start;
+      card.querySelector('.lesson-break').value = breakTime;
+      card.querySelector('.lesson-break-field').hidden = !breakTime;
+      card.querySelector('.lesson-start').addEventListener('input', refreshLessons);
+      card.querySelector('.lesson-break').addEventListener('input', refreshLessons);
+      card.querySelector('.lesson-add-break').addEventListener('click', () => {
+        // A lesson lasts 40 minutes by default.
+        const lessonStart = minutesOf(card.querySelector('.lesson-start').value);
+        if (lessonStart !== null) card.querySelector('.lesson-break').value = timeText(Math.min(lessonStart + 40, 23 * 60 + 59));
+        card.querySelector('.lesson-break-field').hidden = false;
+        refreshLessons();
+        card.querySelector('.lesson-break').focus();
+      });
+      card.querySelector('.lesson-remove-break').addEventListener('click', () => {
+        card.querySelector('.lesson-break').value = '';
+        card.querySelector('.lesson-break-field').hidden = true;
+        refreshLessons();
+      });
+      card.querySelector('.alarm-remove').addEventListener('click', () => {
+        card.remove();
+        refreshLessons();
+      });
+      list.appendChild(card);
+      I18n.localize(card);
+      refreshLessons();
+    }
+
+    function refreshVacations() {
+      const cards = [...document.querySelectorAll('.vacation-card')];
+      cards.forEach((card, index) => {
+        card.querySelector('.alarm-title').textContent = t('Tatil dönemi {number}', {number:index + 1});
+      });
+      byId('vacation-count').textContent = t('{count} / {maximum} tatil dönemi', {count:cards.length,maximum:maximumVacations});
+      byId('vacation-empty').hidden = cards.length !== 0;
+      byId('add-vacation').disabled = cards.length >= maximumVacations;
+    }
+
+    function addVacation(item = null) {
+      const list = byId('vacation-list');
+      if (list.children.length >= maximumVacations) {
+        showStatus(t('En fazla {maximum} tatil dönemi eklenebilir.', {maximum:maximumVacations}), true);
+        return;
+      }
+      const card = document.createElement('div');
+      card.className = 'alarm-card vacation-card';
+      card.innerHTML = `
+        <div class="alarm-card-head">
+          <strong class="alarm-title">Tatil dönemi</strong>
+          <button class="alarm-remove" type="button">Sil</button>
+        </div>
+        <div class="lesson-fields">
+          <div class="field"><label>Başlangıç tarihi</label><input class="vacation-start" type="date" min="2000-01-01" max="2099-12-31"></div>
+          <div class="field"><label>Bitiş tarihi</label><input class="vacation-end" type="date" min="2000-01-01" max="2099-12-31"></div>
+        </div>`;
+      card.querySelector('.vacation-start').value = item && item.start ? item.start : '';
+      card.querySelector('.vacation-end').value = item && item.end ? item.end : '';
+      card.querySelector('.vacation-start').addEventListener('change', event => {
+        const end = card.querySelector('.vacation-end');
+        if (!end.value || end.value < event.target.value) end.value = event.target.value;
+      });
+      card.querySelector('.alarm-remove').addEventListener('click', () => {
+        card.remove();
+        refreshVacations();
+      });
+      list.appendChild(card);
+      I18n.localize(card);
+      refreshVacations();
+    }
+
+    function renderSchoolBell(data, mode) {
+      const school = data || {};
+      maximumLessons = Math.max(1, Number(school.maximumLessons) || 20);
+      maximumVacations = Math.max(1, Number(school.maximumVacations) || 10);
+      document.querySelectorAll('input[name="alarmMode"]').forEach(input => {
+        input.checked = Number(input.value) === (Number(mode) === 1 ? 1 : 0);
+      });
+      byId('schoolDayMode').value = [0, 1, 2].includes(Number(school.dayMode)) ? String(school.dayMode) : '1';
+      const mask = Number(school.dayMask) || 31;
+      document.querySelectorAll('[data-school-day]').forEach(input => {
+        input.checked = (mask & (1 << Number(input.dataset.schoolDay))) !== 0;
+      });
+      byId('schoolDuration').value = Number(school.duration) || 5;
+      renderStudentBellOptions(Number(school.studentBell) || 0);
+      byId('schoolSkipHolidays').checked = school.skipHolidays !== false;
+      byId('schoolRemembrance').checked = Boolean(school.remembrance);
+      byId('lesson-list').replaceChildren();
+      (Array.isArray(school.lessons) ? school.lessons : []).slice(0, maximumLessons).forEach(item => addLesson(item));
+      byId('vacation-list').replaceChildren();
+      (Array.isArray(school.vacations) ? school.vacations : []).slice(0, maximumVacations).forEach(item => addVacation(item));
+      updateSchoolDayControls();
+      updateAlarmMode();
+      refreshLessons();
+      refreshVacations();
+    }
+
+    function formatDeviceDate(text) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text || '');
+      return match ? `${match[3]}.${match[2]}.${match[1]}` : String(text || '');
+    }
+
+    function nextDateText(text) {
+      const date = new Date(text + 'T00:00:00Z');
+      date.setUTCDate(date.getUTCDate() + 1);
+      return date.toISOString().slice(0, 10);
+    }
+
+    function bellLabel(next) {
+      if (next.kind === 'remembrance') return t('10 Kasım saygı duruşu zili');
+      if (next.kind === 'break') return t('{number}. ders teneffüs zili', {number:next.lesson});
+      if (next.kind === 'studentCall') return t('{number}. ders öğrenci zili', {number:next.lesson});
+      return t('{number}. ders zili', {number:next.lesson});
+    }
+
+    // Groups consecutive days of the same holiday into one line.
+    function renderHolidayList(status) {
+      const list = byId('holiday-list');
+      const days = status && status.clock && Array.isArray(status.holidays) ? status.holidays : [];
+      const groups = [];
+      days.forEach(day => {
+        const last = groups[groups.length - 1];
+        if (last && last.name === day.name && nextDateText(last.end) === day.date) last.end = day.date;
+        else groups.push({name:day.name, start:day.date, end:day.date, half:Boolean(day.half)});
+      });
+      const title = document.createElement('li');
+      title.className = 'holiday-title';
+      title.textContent = t('Yaklaşan resmi tatiller');
+      list.replaceChildren(title, ...groups.slice(0, 6).map(group => {
+        const item = document.createElement('li');
+        const time = document.createElement('time');
+        time.textContent = group.start === group.end
+          ? formatDeviceDate(group.start)
+          : `${formatDeviceDate(group.start)} – ${formatDeviceDate(group.end)}`;
+        const name = document.createElement('span');
+        name.textContent = t(group.name) + (group.half ? ' (' + t('13:00 sonrası') + ')' : '');
+        item.append(time, name);
+        return item;
+      }));
+      list.hidden = groups.length === 0;
+      byId('holiday-range').textContent = t('Dini bayram tarihleri Diyanet takvimine göre {year} yılına kadar tanımlıdır.', {year:holidaysKnownUntil});
+    }
+
+    function renderSchoolStatus() {
+      const status = schoolStatusData;
+      renderHolidayList(status);
+      if (!status) return;
+      let state = 'waiting';
+      let label;
+      let detail = '';
+      if (savedAlarmMode !== 1) {
+        label = t('Okul saati etkin değil');
+        detail = t('Okul saati seçilip kaydedildiğinde zil programı çalışmaya başlar.');
+      } else if (!status.clock) {
+        state = 'failed';
+        label = t('Saat okunamıyor');
+        detail = t('DS3231 saati bulunamadığı için okul zili çalmaz.');
+      } else {
+        const holiday = status.holiday ? t(status.holiday) : '';
+        state = status.state === 'schoolDay' ? 'connected' : 'paused';
+        if (status.state === 'schoolDay') label = t('Bugün okul günü');
+        else if (status.state === 'halfDayHoliday') {
+          label = t('Bugün yarım gün resmi tatil');
+          detail = t('{holiday}: saat 13:00 sonrasında zil çalmaz.', {holiday}) + ' ';
+        } else if (status.state === 'publicHoliday') {
+          label = t('Bugün resmi tatil');
+          detail = holiday + '. ';
+        } else if (status.state === 'vacation') label = t('Bugün tatil dönemi');
+        else label = t('Bugün okul günü değil');
+        if (status.next) {
+          const day = status.next.date === status.today
+            ? t('bugün')
+            : status.next.date === nextDateText(status.today) ? t('yarın') : formatDeviceDate(status.next.date);
+          detail += t('Sıradaki zil: {day} {time} — {bell}', {day, time:status.next.time, bell:bellLabel(status.next)});
+        } else {
+          detail += t('Programda çalacak zil yok.');
+        }
+      }
+      byId('school-status').dataset.state = state;
+      byId('school-status-label').textContent = label;
+      byId('school-status-detail').textContent = detail;
+    }
+
+    // Checks the school bell form and adds it to the request body.
+    function appendSchoolBellFields(body) {
+      const cards = lessonCards();
+      const lead = Number(byId('schoolStudentBell').value) || 0;
+      if (cards.length === 0 && !byId('schoolRemembrance').checked) {
+        throw new Error(t('Okul saati için en az bir ders ekleyin.'));
+      }
+      let previousEnd = null;
+      cards.forEach((card, index) => {
+        const number = index + 1;
+        const lesson = lessonTimes(card);
+        if (lesson.start === null || (lesson.hasBreak && lesson.end === null)) {
+          throw new Error(t('{number}. dersin saati eksik.', {number}));
+        }
+        if (lesson.hasBreak && lesson.end <= lesson.start) {
+          throw new Error(t('{number}. dersin teneffüs zili ders başlangıcından sonra olmalıdır.', {number}));
+        }
+        if (previousEnd !== null && lesson.start <= previousEnd) {
+          throw new Error(t('{number}. ders, bir önceki dersin teneffüs zilinden sonra başlamalıdır.', {number}));
+        }
+        if (lead > 0 && (lesson.start < lead || (previousEnd !== null && lesson.start - lead <= previousEnd))) {
+          throw new Error(t('{number}. dersin öğrenci zili bir önceki dersin teneffüs zilinden sonra çalmalıdır; öğrenci zili süresini kısaltın.', {number}));
+        }
+        previousEnd = lesson.hasBreak ? lesson.end : lesson.start;
+        body.set(`lessonStart${index}`, timeText(lesson.start));
+        body.set(`lessonBreak${index}`, lesson.hasBreak ? timeText(lesson.end) : '');
+      });
+      const duration = Number(byId('schoolDuration').value);
+      if (!Number.isInteger(duration) || duration < 1 || duration > 3600) {
+        throw new Error(t('Zil süresi 1-3600 saniye olmalıdır.'));
+      }
+      if (Number(byId('schoolDayMode').value) === 2 && schoolDayMask() === 0) {
+        throw new Error(t('Okul saati için en az bir gün seçilmelidir.'));
+      }
+      const vacations = [...document.querySelectorAll('.vacation-card')];
+      vacations.forEach((card, index) => {
+        const number = index + 1;
+        const start = card.querySelector('.vacation-start').value;
+        const end = card.querySelector('.vacation-end').value;
+        if (!start || !end) throw new Error(t('Tatil dönemi {number} için başlangıç ve bitiş tarihi girin.', {number}));
+        if (end < start) throw new Error(t('Tatil dönemi {number}: bitiş tarihi başlangıçtan önce olamaz.', {number}));
+        body.set(`vacationStart${index}`, start);
+        body.set(`vacationEnd${index}`, end);
+      });
+      body.set('schoolLessonCount', String(cards.length));
+      body.set('schoolDayMode', byId('schoolDayMode').value);
+      body.set('schoolDayMask', String(schoolDayMask()));
+      body.set('schoolDuration', String(duration));
+      body.set('schoolStudentBell', String(lead));
+      body.set('schoolSkipHolidays', byId('schoolSkipHolidays').checked ? '1' : '0');
+      body.set('schoolRemembrance', byId('schoolRemembrance').checked ? '1' : '0');
+      body.set('vacationCount', String(vacations.length));
+    }
+
+    document.querySelectorAll('input[name="alarmMode"]').forEach(input => input.addEventListener('change', updateAlarmMode));
+    byId('schoolDayMode').addEventListener('change', updateSchoolDayControls);
+    document.querySelectorAll('[data-school-day]').forEach(input => input.addEventListener('change', () => {
+      if (schoolDayMask() === 0) {
+        input.checked = true;
+        showStatus('Okul saati için en az bir gün seçilmelidir.', true);
+      }
+    }));
+    byId('add-lesson').addEventListener('click', () => addLesson());
+    byId('add-vacation').addEventListener('click', () => addVacation());
+    byId('test-bell').addEventListener('click', async () => {
+      const seconds = selectedAlarmMode() === 1
+        ? Math.max(1, Math.min(30, Number(byId('schoolDuration').value) || 5))
+        : 3;
+      try {
+        const result = await request('/api/alarm/test', {
+          method: 'POST',
+          headers: {'Content-Type':'application/x-www-form-urlencoded'},
+          body: new URLSearchParams({seconds:String(seconds)})
+        });
+        showStatus(I18n.server(result.message, 'İşlem tamamlandı.'));
+      } catch (error) { showStatus(error.message, true); }
+    });
 
     function selectConnection(value) {
       const selectedValue = String(value);
@@ -1927,6 +2628,7 @@ R"HTML(</footer>
         byId('hdc2022HumidityResolution').value = sensor.hdc2022HumidityResolution;
         updateSensorOptions();
         renderAlarms(data.alarms);
+        renderSchoolBell(data.schoolBell, data.alarmMode);
         byId('slaveAddress').value = data.communication.slaveAddress;
         byId('baudRate').value = data.communication.baudRate;
         byId('dataBits').value = data.communication.dataBits;
@@ -1953,6 +2655,13 @@ R"HTML(</footer>
 
       timeSyncData = data.timeSync;
       renderTimeSyncStatus();
+
+      savedAlarmMode = Number(data.alarmMode) === 1 ? 1 : 0;
+      if (data.schoolBell) {
+        holidaysKnownUntil = Number(data.schoolBell.holidaysKnownUntil) || holidaysKnownUntil;
+        schoolStatusData = data.schoolBell.status || null;
+      }
+      renderSchoolStatus();
     }
 
     async function loadSettings(initial = true) {
@@ -1968,7 +2677,7 @@ R"HTML(</footer>
       try {
         if (endpoint === '/api/settings/alarms') {
           refreshAlarmList();
-          const invalidCustomDays = [...document.querySelectorAll('.alarm-card')].some(card =>
+          const invalidCustomDays = [...document.querySelectorAll('#alarm-list .alarm-card')].some(card =>
             Number(card.querySelector('.alarm-days').value) === 2
             && alarmDayMask(card) === 0);
           if (invalidCustomDays) {
@@ -2011,17 +2720,20 @@ R"HTML(</footer>
           body.set('staAuthentication', byId('staAuthentication').checked ? '1' : '0');
         }
         if (endpoint === '/api/settings/alarms') {
-          const alarmCards = [...document.querySelectorAll('.alarm-card')];
+          const alarmCards = [...document.querySelectorAll('#alarm-list .alarm-card')];
           body.set('alarmCount', alarmCards.length);
           alarmCards.forEach((card, index) => {
             body.set(`alarmDayMask${index}`, String(alarmDayMask(card)));
           });
+          // The stored school schedule is kept when manual alarms are saved.
+          if (selectedAlarmMode() === 1) appendSchoolBellFields(body);
         }
         const result = await request(endpoint, {method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body});
         showStatus(I18n.server(result.message, 'İşlem tamamlandı.'));
         if (endpoint === '/api/settings/clock') clockState.fromDevice = true;
         if (endpoint === '/api/settings/time-sync') setTimeout(() => loadSettings(false), 3000);
         if (endpoint === '/api/settings/temperature-sensor') setTimeout(loadSensorStatus, 300);
+        if (endpoint === '/api/settings/alarms') loadSettings(false);
       } catch (error) { showStatus(error.message, true); }
     }
 
@@ -2123,6 +2835,139 @@ R"HTML(</footer>
       xhr.send(body);
     });
 
+    let onlineUpdateData = null;
+    let onlineUpdateTimer = 0;
+    let installingVersion = '';
+
+    function onlineUpdateBusy(data) {
+      return Boolean(data) && ['checking', 'downloading', 'installed'].includes(data.state);
+    }
+
+    function formatCheckAge(seconds) {
+      if (seconds < 60) return t('az önce');
+      if (seconds < 3600) return t('{minutes} dakika önce', {minutes:Math.floor(seconds / 60)});
+      return t('{hours} saat önce', {hours:Math.floor(seconds / 3600)});
+    }
+
+    function renderOnlineUpdate() {
+      const data = onlineUpdateData;
+      if (!data) return;
+      let state = 'waiting';
+      let label;
+      let detail;
+      if (data.state === 'checking') {
+        state = 'connecting';
+        label = t('Güncellemeler denetleniyor');
+        detail = t('GitHub sunucusuna bağlanılıyor…');
+      } else if (data.state === 'downloading') {
+        state = 'connecting';
+        label = t('Güncelleme indiriliyor');
+        detail = t('{version} sürümü indirilip kuruluyor. Bu sırada cihazın elektriğini kesmeyin.', {version:data.latest});
+      } else if (data.state === 'installed') {
+        state = 'connected';
+        label = t('Güncelleme kuruldu');
+        detail = t('Cihaz yeniden başlatılıyor; sayfa cihaz açılınca kendiliğinden yenilenir.');
+      } else if (data.state === 'failed') {
+        state = 'failed';
+        label = t('Güncelleme işlemi başarısız');
+        detail = I18n.server(data.error, 'İşlem başarısız.');
+      } else if (data.updateAvailable) {
+        state = 'paused';
+        label = t('Yeni sürüm bulundu');
+        detail = t('{version} sürümü kurulabilir. Yüklü sürüm: {current}.', {version:data.latest, current:data.current});
+      } else if (data.state === 'upToDate') {
+        state = 'connected';
+        label = t('Yazılım güncel');
+        detail = t('Yüklü sürüm GitHub üzerindeki en son sürüm.');
+      } else {
+        label = t('Henüz denetlenmedi');
+        detail = data.stationConnected
+          ? t('Otomatik denetim, STA bağlantısından birkaç dakika sonra yapılır.')
+          : t('Güncellemeleri denetlemek için cihazın STA ağı üzerinden internete bağlı olması gerekir.');
+      }
+      if (!onlineUpdateBusy(data) && data.secondsSinceCheck >= 0) {
+        detail += ' ' + t('Son denetim: {age}.', {age:formatCheckAge(Number(data.secondsSinceCheck))});
+      }
+      byId('online-update-status').dataset.state = state;
+      byId('online-update-label').textContent = label;
+      byId('online-update-detail').textContent = detail;
+      byId('online-update-version').hidden = false;
+      byId('online-update-version').textContent = 'v' + data.current;
+      byId('online-update-repository').textContent = data.repository + ' (master)';
+
+      const rollback = byId('online-update-rollback');
+      rollback.hidden = !data.rolledBack;
+      rollback.textContent = data.rolledBack
+        ? t('{version} sürümü başlatılamadı; cihaz önceki sürüme döndü.', {version:data.rolledBack})
+        : '';
+
+      const offer = Boolean(data.updateAvailable) && data.state !== 'installed';
+      byId('online-update-offer').hidden = !offer;
+      if (offer) {
+        const size = Number(data.size) ? ' • ' + firmwareFileSize(Number(data.size)) : '';
+        byId('online-update-title').textContent = t('Yeni sürüm: {version}', {version:data.latest}) + size;
+        byId('online-update-notes').textContent = data.notes ? t('Son değişiklik: {notes}', {notes:data.notes}) : '';
+        byId('online-update-notes').hidden = !data.notes;
+      }
+      const install = byId('online-update-install');
+      install.hidden = !offer;
+      install.disabled = onlineUpdateBusy(data);
+      install.textContent = t('{version} Sürümüne Güncelle', {version:data.latest});
+      byId('online-update-check').disabled = onlineUpdateBusy(data);
+      byId('onlineUpdateAuto').checked = Boolean(data.automatic);
+
+      const showProgress = data.state === 'downloading' || data.state === 'installed';
+      byId('online-update-progress').hidden = !showProgress;
+      const percent = Math.max(0, Math.min(100, Number(data.progress) || 0));
+      byId('online-update-bar').style.width = percent + '%';
+      byId('online-update-value').value = percent + '%';
+      byId('online-update-track').setAttribute('aria-valuenow', String(percent));
+      byId('firmware-tab-badge').hidden = !data.updateAvailable || data.state === 'installed';
+    }
+
+    function applyOnlineUpdate(data) {
+      if (installingVersion && data.current === installingVersion) {
+        // The device came back with the new firmware; load its portal.
+        installingVersion = '';
+        location.reload();
+        return;
+      }
+      if (data.state === 'installed' || data.state === 'downloading') installingVersion = data.latest;
+      onlineUpdateData = data;
+      renderOnlineUpdate();
+    }
+
+    async function loadOnlineUpdate() {
+      clearTimeout(onlineUpdateTimer);
+      if (!firmwareUploadActive) {
+        try { applyOnlineUpdate(await request('/api/firmware/online')); }
+        catch (error) { /* Retried by the next poll, e.g. while the device restarts. */ }
+      }
+      const fast = onlineUpdateBusy(onlineUpdateData) || Boolean(installingVersion);
+      onlineUpdateTimer = setTimeout(loadOnlineUpdate, fast ? 2000 : 15000);
+    }
+
+    async function sendOnlineUpdate(fields) {
+      try {
+        const data = await request('/api/firmware/online', {
+          method: 'POST',
+          headers: {'Content-Type':'application/x-www-form-urlencoded'},
+          body: new URLSearchParams(fields)
+        });
+        applyOnlineUpdate(data);
+        if (data.message) showStatus(I18n.server(data.message, 'İşlem tamamlandı.'));
+      } catch (error) { showStatus(error.message, true); }
+      loadOnlineUpdate();
+    }
+
+    byId('online-update-check').addEventListener('click', () => sendOnlineUpdate({action:'check'}));
+    byId('online-update-install').addEventListener('click', () => {
+      if (!onlineUpdateData || !onlineUpdateData.updateAvailable) return;
+      if (!confirm(t('Cihaz {version} sürümüne güncellenecek ve yeniden başlayacak. Güncelleme sırasında cihazın elektriğini kesmeyin. Devam edilsin mi?', {version:onlineUpdateData.latest}))) return;
+      sendOnlineUpdate({action:'install'});
+    });
+    byId('onlineUpdateAuto').addEventListener('change', event => sendOnlineUpdate({action:'auto', enabled:event.target.checked ? '1' : '0'}));
+
     document.querySelectorAll('[data-color]').forEach(button => button.addEventListener('click', async () => {
       try {
         const result = await request('/api/panel/test?color=' + button.dataset.color, {method: 'POST'});
@@ -2138,10 +2983,19 @@ R"HTML(</footer>
     });
 
     refreshAlarmList();
+    renderStudentBellOptions(0);
+    refreshLessons();
+    refreshVacations();
     loadSettings();
     loadWifiStatus();
+    loadOnlineUpdate();
     I18n.onChange(() => {
+      renderOnlineUpdate();
       refreshAlarmList();
+      refreshLessons();
+      refreshVacations();
+      renderStudentBellOptions();
+      renderSchoolStatus();
       if (wifiStatusData) renderWifiStatus(wifiStatusData);
       renderTimeSyncStatus();
       renderStaPasswordPlaceholder();

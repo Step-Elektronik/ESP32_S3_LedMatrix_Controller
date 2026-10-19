@@ -6,6 +6,7 @@
 #include <new>
 
 #include "AppConfig.h"
+#include "CalendarDate.h"
 #include "UiText.h"
 
 namespace {
@@ -200,6 +201,42 @@ struct LegacyContentSettingsV6 {
   LegacyContentItemSettingsV6 items[maxContentItems];
 };
 
+// Schema v8 adds the countdown duration and its alarm time.
+struct LegacyContentItemSettingsV7 {
+  ContentBoxKind boxKind;
+  uint8_t panelIndex;
+  ContentType type;
+  TextRotation rotation;
+  int16_t x;
+  int16_t y;
+  uint8_t red;
+  uint8_t green;
+  uint8_t blue;
+  bool scrolling;
+  ScrollDirection direction;
+  uint8_t speedPixelsPerSecond;
+  bool cycleEnabled;
+  uint8_t cycleContentMask;
+  uint16_t cycleIntervalSeconds;
+  char text[maxContentTextLength];
+  ValueSource valueSource;
+  ModbusValueType modbusValueType;
+  CounterDirection counterDirection;
+  uint16_t registerAddress;
+  int32_t initialIntegerValue;
+  float initialFloatValue;
+  TemperatureDisplayFormat temperatureDisplayFormat;
+  uint8_t fontId;
+  ScrollArea scrollArea;
+  uint8_t valueDecimals;
+};
+
+struct LegacyContentSettingsV7 {
+  uint16_t schemaVersion;
+  uint8_t count;
+  LegacyContentItemSettingsV7 items[maxContentItems];
+};
+
 bool isValidSsid(const String &ssid, bool allowEmpty)
 {
   const size_t length = ssid.length();
@@ -273,6 +310,14 @@ void initializeDefaultContent(ContentSettings &content)
   defaultClock.cycleContentMask = contentTypeMask(ContentType::time);
   defaultClock.cycleIntervalSeconds = defaultCycleIntervalSeconds;
   defaultClock.fontId = FontModel::defaultFontId;
+}
+
+bool isValidDateKey(uint32_t key)
+{
+  return isValidDate(
+    static_cast<uint16_t>(key / 10000UL),
+    static_cast<uint8_t>((key / 100UL) % 100UL),
+    static_cast<uint8_t>(key % 100UL));
 }
 
 void initializeDefaultAlarms(AlarmSettings &alarms)
@@ -557,6 +602,49 @@ void migrateLegacyContent(
   }
 }
 
+void migrateLegacyContent(
+  const LegacyContentSettingsV7 &legacy,
+  ContentSettings &content)
+{
+  std::memset(&content, 0, sizeof(content));
+  content.schemaVersion = contentSchemaVersion;
+  content.count = legacy.count;
+
+  const uint8_t itemCount = legacy.count > maxContentItems
+    ? maxContentItems
+    : legacy.count;
+  for (uint8_t index = 0; index < itemCount; ++index) {
+    const LegacyContentItemSettingsV7 &source = legacy.items[index];
+    ContentItemSettings &target = content.items[index];
+    target.boxKind = source.boxKind;
+    target.panelIndex = source.panelIndex;
+    target.type = source.type;
+    target.rotation = source.rotation;
+    target.x = source.x;
+    target.y = source.y;
+    target.red = source.red;
+    target.green = source.green;
+    target.blue = source.blue;
+    target.scrolling = source.scrolling;
+    target.direction = source.direction;
+    target.speedPixelsPerSecond = source.speedPixelsPerSecond;
+    target.cycleEnabled = source.cycleEnabled;
+    target.cycleContentMask = source.cycleContentMask;
+    target.cycleIntervalSeconds = source.cycleIntervalSeconds;
+    std::memcpy(target.text, source.text, sizeof(target.text));
+    target.valueSource = source.valueSource;
+    target.modbusValueType = source.modbusValueType;
+    target.counterDirection = source.counterDirection;
+    target.registerAddress = source.registerAddress;
+    target.initialIntegerValue = source.initialIntegerValue;
+    target.initialFloatValue = source.initialFloatValue;
+    target.temperatureDisplayFormat = source.temperatureDisplayFormat;
+    target.fontId = source.fontId;
+    target.scrollArea = source.scrollArea;
+    target.valueDecimals = source.valueDecimals;
+  }
+}
+
 // Copies a stored blob into a heap-allocated legacy layout and upgrades it.
 // The loop task stack is only 8 KB, so the ~2.7 KB layouts stay off it.
 template <typename LegacySettings>
@@ -574,6 +662,10 @@ bool migrateStoredContent(
   }
   std::memcpy(legacy.get(), blob, sizeof(LegacySettings));
   migrateLegacyContent(*legacy, content);
+  for (ContentItemSettings &item : content.items) {
+    item.countdownSeconds = defaultCountdownSeconds;
+    item.countdownAlarmSeconds = defaultCountdownAlarmSeconds;
+  }
   return true;
 }
 
@@ -661,6 +753,16 @@ bool SettingsService::begin()
     alarmSettingsRepaired = true;
   }
 
+  bool schoolBellRepaired = !loadSchoolBell();
+  const uint8_t storedAlarmMode = preferences_.getUChar(
+    "alarm_mode",
+    static_cast<uint8_t>(AlarmMode::manual));
+  const bool alarmModeRepaired =
+    storedAlarmMode > static_cast<uint8_t>(AlarmMode::schoolBell);
+  alarmMode_ = alarmModeRepaired
+    ? AlarmMode::manual
+    : static_cast<AlarmMode>(storedAlarmMode);
+
   timeSync_.ntpEnabled = preferences_.getBool("ntp_enabled", timeSync_.ntpEnabled);
   timeSync_.ntpServer = preferences_.getString("ntp_server", timeSync_.ntpServer);
   timeSync_.timeZone = preferences_.getString("ntp_tz", timeSync_.timeZone);
@@ -734,6 +836,12 @@ bool SettingsService::begin()
     alarmSettingsRepaired = true;
   }
 
+  if (!validateSchoolBell(schoolBell_, validationError)) {
+    Serial.printf("Invalid stored school bell settings: %s; defaults restored.\n", validationError.c_str());
+    schoolBell_ = SchoolBellSettings{};
+    schoolBellRepaired = true;
+  }
+
   if (!validateContent(content_, panel_, validationError)) {
     Serial.printf("Invalid stored content settings: %s; defaults restored.\n", validationError.c_str());
     contentSettingsRepaired = true;
@@ -765,6 +873,12 @@ bool SettingsService::begin()
   }
   if (alarmSettingsRepaired && !saveAlarms(alarms_)) {
     Serial.println("ERROR: Safe alarm defaults could not be stored.");
+  }
+  if (schoolBellRepaired && !saveSchoolBell(schoolBell_)) {
+    Serial.println("ERROR: Safe school bell defaults could not be stored.");
+  }
+  if (alarmModeRepaired && !saveAlarmMode(alarmMode_)) {
+    Serial.println("ERROR: Alarm mode could not be stored.");
   }
   if (contentSettingsRepaired && !saveContent(content_)) {
     Serial.println("ERROR: Safe content defaults could not be stored.");
@@ -813,6 +927,25 @@ bool SettingsService::loadTemperatureSensor()
   return true;
 }
 
+bool SettingsService::loadSchoolBell()
+{
+  // Returns false when stored data is unusable and defaults must be stored.
+  schoolBell_ = SchoolBellSettings{};
+  if (!preferences_.isKey("school_bell")) {
+    return true;
+  }
+
+  SchoolBellSettings stored;
+  if (preferences_.getBytesLength("school_bell") != sizeof(stored)
+      || preferences_.getBytes("school_bell", &stored, sizeof(stored)) != sizeof(stored)
+      || stored.schemaVersion != schoolBellSchemaVersion) {
+    Serial.println("Stored school bell settings are unreadable; defaults restored.");
+    return false;
+  }
+  schoolBell_ = stored;
+  return true;
+}
+
 bool SettingsService::loadContent()
 {
   // Returns true when the stored design is current and can be used as-is;
@@ -840,6 +973,9 @@ bool SettingsService::loadContent()
 
   bool migrated = false;
   switch (storedVersion) {
+    case 7:
+      migrated = migrateStoredContent<LegacyContentSettingsV7>(blob.get(), storedSize, content_);
+      break;
     case 6:
       migrated = migrateStoredContent<LegacyContentSettingsV6>(blob.get(), storedSize, content_);
       break;
@@ -905,6 +1041,16 @@ const TemperatureSensorSettings &SettingsService::temperatureSensor() const
 const AlarmSettings &SettingsService::alarms() const
 {
   return alarms_;
+}
+
+const SchoolBellSettings &SettingsService::schoolBell() const
+{
+  return schoolBell_;
+}
+
+AlarmMode SettingsService::alarmMode() const
+{
+  return alarmMode_;
 }
 
 const ContentSettings &SettingsService::content() const
@@ -1059,6 +1205,34 @@ bool SettingsService::saveAlarms(const AlarmSettings &settings)
   return true;
 }
 
+bool SettingsService::saveSchoolBell(const SchoolBellSettings &settings)
+{
+  String error;
+  if (!ready_ || !validateSchoolBell(settings, error)) {
+    return false;
+  }
+
+  if (preferences_.putBytes("school_bell", &settings, sizeof(settings))
+      != sizeof(settings)) {
+    return false;
+  }
+
+  schoolBell_ = settings;
+  return true;
+}
+
+bool SettingsService::saveAlarmMode(AlarmMode mode)
+{
+  if (!ready_ || static_cast<uint8_t>(mode) > static_cast<uint8_t>(AlarmMode::schoolBell)) {
+    return false;
+  }
+  if (preferences_.putUChar("alarm_mode", static_cast<uint8_t>(mode)) != 1) {
+    return false;
+  }
+  alarmMode_ = mode;
+  return true;
+}
+
 bool SettingsService::saveContent(const ContentSettings &settings)
 {
   String error;
@@ -1094,6 +1268,8 @@ bool SettingsService::factoryReset()
   const bool timeSyncStored = saveTimeSync(timeSync_);
   const bool temperatureSensorStored = saveTemperatureSensor(temperatureSensor_);
   const bool alarmsStored = saveAlarms(alarms_);
+  const bool schoolBellStored = saveSchoolBell(schoolBell_);
+  const bool alarmModeStored = saveAlarmMode(alarmMode_);
   const bool contentStored = saveContent(content_);
   return panelStored
       && networkStored
@@ -1102,6 +1278,8 @@ bool SettingsService::factoryReset()
       && timeSyncStored
       && temperatureSensorStored
       && alarmsStored
+      && schoolBellStored
+      && alarmModeStored
       && contentStored;
 }
 
@@ -1338,6 +1516,80 @@ bool SettingsService::validateAlarms(
   return true;
 }
 
+bool SettingsService::validateSchoolBell(
+  const SchoolBellSettings &settings,
+  String &error)
+{
+  if (settings.schemaVersion != schoolBellSchemaVersion
+      || settings.lessonCount > maximumSchoolLessons
+      || settings.vacationCount > maximumSchoolVacations) {
+    error = UI_TEXT("Okul saati veri formatı geçersiz.");
+    return false;
+  }
+  if (static_cast<uint8_t>(settings.dayMode)
+      > static_cast<uint8_t>(ScheduleDayMode::customDays)) {
+    error = UI_TEXT("Okul saati gün seçimi geçersiz.");
+    return false;
+  }
+  if ((settings.customDayMask & ~alarmAllDaysMask) != 0
+      || (settings.dayMode == ScheduleDayMode::customDays
+          && settings.customDayMask == 0)) {
+    error = UI_TEXT("Okul saati için en az bir gün seçilmelidir.");
+    return false;
+  }
+  if (settings.durationSeconds < minimumAlarmDurationSeconds
+      || settings.durationSeconds > maximumAlarmDurationSeconds) {
+    error = UI_TEXT("Zil süresi 1-3600 saniye olmalıdır.");
+    return false;
+  }
+  if (settings.studentBellLeadMinutes > maximumStudentBellLeadMinutes) {
+    error = UI_TEXT("Öğrenci zili en fazla 10 dakika önce çalabilir.");
+    return false;
+  }
+
+  const uint16_t lead = settings.studentBellLeadMinutes;
+  uint16_t previousEnd = 0;
+  for (uint8_t index = 0; index < settings.lessonCount; ++index) {
+    const SchoolLesson &lesson = settings.lessons[index];
+    const bool hasBreak = lesson.breakMinute != noSchoolBreak;
+    if (lesson.startMinute >= minutesPerDay
+        || (hasBreak && lesson.breakMinute >= minutesPerDay)) {
+      error = UI_TEXT("Ders saati geçersiz.");
+      return false;
+    }
+    if (hasBreak && lesson.breakMinute <= lesson.startMinute) {
+      error = UI_TEXT("Teneffüs zili ders başlangıcından sonra olmalıdır.");
+      return false;
+    }
+    if (index > 0 && lesson.startMinute <= previousEnd) {
+      error = UI_TEXT("Dersler sırayla girilmelidir; her ders bir önceki dersin teneffüs zilinden sonra başlamalıdır.");
+      return false;
+    }
+    if (lead > 0
+        && (lesson.startMinute < lead
+            || (index > 0 && lesson.startMinute - lead <= previousEnd))) {
+      error = UI_TEXT("Öğrenci zili bir önceki dersin teneffüs zilinden sonra çalmalıdır; öğrenci zili süresini kısaltın.");
+      return false;
+    }
+    previousEnd = hasBreak ? lesson.breakMinute : lesson.startMinute;
+  }
+
+  for (uint8_t index = 0; index < settings.vacationCount; ++index) {
+    const SchoolVacation &vacation = settings.vacations[index];
+    if (!isValidDateKey(vacation.firstDate) || !isValidDateKey(vacation.lastDate)) {
+      error = UI_TEXT("Tatil dönemi tarihi geçersiz.");
+      return false;
+    }
+    if (vacation.lastDate < vacation.firstDate) {
+      error = UI_TEXT("Tatil döneminin bitişi başlangıcından önce olamaz.");
+      return false;
+    }
+  }
+
+  error.clear();
+  return true;
+}
+
 bool SettingsService::validateContent(
   const ContentSettings &settings,
   const PanelSettings &panel,
@@ -1410,6 +1662,20 @@ bool SettingsService::validateContent(
       if (type > static_cast<uint8_t>(lastContentType)) {
         error = UI_TEXT("TextBox veri tipi geçersiz.");
         return false;
+      }
+      if (item.type == ContentType::countdown) {
+        if (item.cycleEnabled) {
+          error = UI_TEXT("Geri sayım içerik döngüsüne eklenemez.");
+          return false;
+        }
+        if (item.countdownSeconds < 1 || item.countdownSeconds > maximumCountdownSeconds) {
+          error = UI_TEXT("Geri sayım süresi 1 saniye ile 23:59:59 arasında olmalıdır.");
+          return false;
+        }
+        if (item.countdownAlarmSeconds > maximumCountdownAlarmSeconds) {
+          error = UI_TEXT("Geri sayım alarm süresi 0-3600 saniye olmalıdır.");
+          return false;
+        }
       }
       if (!item.cycleEnabled
           && item.type == ContentType::text
@@ -1536,5 +1802,7 @@ void SettingsService::loadDefaults()
   };
   temperatureSensor_ = TemperatureSensorSettings{};
   initializeDefaultAlarms(alarms_);
+  schoolBell_ = SchoolBellSettings{};
+  alarmMode_ = AlarmMode::manual;
   initializeDefaultContent(content_);
 }

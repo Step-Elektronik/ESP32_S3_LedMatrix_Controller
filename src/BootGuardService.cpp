@@ -1,5 +1,7 @@
 #include "BootGuardService.h"
 
+#include <esp_ota_ops.h>
+
 #include <Arduino.h>
 #include <esp_system.h>
 
@@ -75,6 +77,7 @@ void BootGuardService::update()
   }
 
   if (millis() - bootStartedAt_ >= AppConfig::bootStableDurationMs) {
+    confirmRunningFirmware();
     if (resetCounter()) {
       Serial.println("Boot guard counter cleared after 60 seconds of stable operation.");
     }
@@ -83,8 +86,24 @@ void BootGuardService::update()
 
 void BootGuardService::prepareForPlannedRestart()
 {
+  // A planned restart means the firmware works; it must not be rolled back.
+  confirmRunningFirmware();
   if (ready_) {
     resetCounter();
+  }
+}
+
+void BootGuardService::confirmRunningFirmware()
+{
+  // After an OTA update the new firmware starts as "pending verify"; if it
+  // resets before this call, the bootloader starts the previous firmware.
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  if (running != nullptr
+      && esp_ota_get_state_partition(running, &state) == ESP_OK
+      && state == ESP_OTA_IMG_PENDING_VERIFY
+      && esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+    Serial.println("New firmware confirmed; rollback cancelled.");
   }
 }
 

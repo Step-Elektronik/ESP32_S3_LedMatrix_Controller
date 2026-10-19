@@ -4,8 +4,25 @@
 #include <RTClib.h>
 
 #include "AppConfig.h"
+#include "CalendarDate.h"
 #include "ClockApplication.h"
+#include "SchoolBellSchedule.h"
 #include "SettingsService.h"
+
+namespace {
+
+const char *schoolBellKindName(SchoolBellKind kind)
+{
+  switch (kind) {
+    case SchoolBellKind::lesson: return "lesson";
+    case SchoolBellKind::breakTime: return "break";
+    case SchoolBellKind::studentCall: return "student call";
+    case SchoolBellKind::remembrance: return "remembrance";
+    default: return "bell";
+  }
+}
+
+} // namespace
 
 AlarmApplication::AlarmApplication(
   ClockApplication &clock,
@@ -33,10 +50,17 @@ void AlarmApplication::update()
   }
 
   const uint32_t nowMs = millis();
-  if (relayActive_
-      && static_cast<int32_t>(nowMs - relayOffAt_) >= 0) {
-    setRelay(false);
-    Serial.println("Alarm relay duration ended; relay switched off.");
+  if (scheduledRelayActive_
+      && static_cast<int32_t>(nowMs - scheduledRelayOffAt_) >= 0) {
+    scheduledRelayActive_ = false;
+    updateRelayOutput();
+    Serial.println("Alarm relay duration ended.");
+  }
+  if (countdownRelayActive_
+      && static_cast<int32_t>(nowMs - countdownRelayOffAt_) >= 0) {
+    countdownRelayActive_ = false;
+    updateRelayOutput();
+    Serial.println("Countdown alarm duration ended.");
   }
 
   if (!clock_.ready()) {
@@ -44,6 +68,15 @@ void AlarmApplication::update()
   }
 
   const ClockDateTime now = clock_.dateTime();
+  if (settings_.alarmMode() == AlarmMode::schoolBell) {
+    updateSchoolBell(now);
+  } else {
+    updateManualAlarms(now);
+  }
+}
+
+void AlarmApplication::updateManualAlarms(const ClockDateTime &now)
+{
   const uint32_t today = dateKey(now);
   const AlarmSettings &settings = settings_.alarms();
 
@@ -76,9 +109,79 @@ void AlarmApplication::update()
   }
 }
 
+void AlarmApplication::updateSchoolBell(const ClockDateTime &now)
+{
+  const int32_t day = daysFromCivil(CalendarDate{now.year, now.month, now.day});
+  const uint16_t minute = static_cast<uint16_t>(now.hour * 60U + now.minute);
+  if (day == lastSchoolBellDay_ && minute == lastSchoolBellMinute_) {
+    return;
+  }
+  lastSchoolBellDay_ = day;
+  lastSchoolBellMinute_ = minute;
+
+  const SchoolBellSettings &school = settings_.schoolBell();
+  SchoolBellEvent event;
+  if ((day == lastRungSchoolBellDay_ && minute == lastRungSchoolBellMinute_)
+      || !SchoolBellSchedule::bellAt(school, day, minute, event)) {
+    return;
+  }
+
+  lastRungSchoolBellDay_ = day;
+  lastRungSchoolBellMinute_ = minute;
+  activateScheduledRelay(school.durationSeconds);
+  Serial.printf(
+    "School bell (%s, lesson %u) at %02u:%02u for %u seconds.\n",
+    schoolBellKindName(event.kind),
+    static_cast<unsigned>(event.lesson + 1),
+    static_cast<unsigned>(now.hour),
+    static_cast<unsigned>(now.minute),
+    static_cast<unsigned>(school.durationSeconds));
+}
+
+void AlarmApplication::testRelay(uint16_t durationSeconds)
+{
+  if (!ready_ || durationSeconds == 0) {
+    return;
+  }
+  activateScheduledRelay(durationSeconds);
+  Serial.printf("Relay test for %u seconds.\n", static_cast<unsigned>(durationSeconds));
+}
+
 bool AlarmApplication::relayActive() const
 {
-  return relayActive_;
+  return relayOutputActive_;
+}
+
+void AlarmApplication::activateCountdownAlarm(uint16_t durationSeconds)
+{
+  if (!ready_ || durationSeconds == 0) {
+    return;
+  }
+
+  const uint32_t requestedOffAt =
+    millis() + static_cast<uint32_t>(durationSeconds) * 1000UL;
+  if (!countdownRelayActive_
+      || static_cast<int32_t>(requestedOffAt - countdownRelayOffAt_) > 0) {
+    countdownRelayOffAt_ = requestedOffAt;
+  }
+  countdownRelayActive_ = true;
+  updateRelayOutput();
+  Serial.printf("Countdown finished; alarm relay on for %u seconds.\n", durationSeconds);
+}
+
+void AlarmApplication::stopCountdownAlarm()
+{
+  if (!countdownRelayActive_) {
+    return;
+  }
+  countdownRelayActive_ = false;
+  updateRelayOutput();
+  Serial.println("Countdown alarm stopped.");
+}
+
+bool AlarmApplication::countdownAlarmActive() const
+{
+  return countdownRelayActive_;
 }
 
 uint32_t AlarmApplication::dateKey(const ClockDateTime &dateTime)
@@ -138,16 +241,7 @@ void AlarmApplication::trigger(
   uint8_t alarmIndex,
   const AlarmItemSettings &alarm)
 {
-  const uint32_t nowMs = millis();
-  const uint32_t requestedOffAt =
-    nowMs + static_cast<uint32_t>(alarm.durationSeconds) * 1000UL;
-
-  if (!relayActive_
-      || static_cast<int32_t>(requestedOffAt - relayOffAt_) > 0) {
-    relayOffAt_ = requestedOffAt;
-  }
-  setRelay(true);
-
+  activateScheduledRelay(alarm.durationSeconds);
   Serial.printf(
     "Alarm %u triggered at %02u:%02u for %u seconds.\n",
     static_cast<unsigned>(alarmIndex + 1),
@@ -156,13 +250,27 @@ void AlarmApplication::trigger(
     static_cast<unsigned>(alarm.durationSeconds));
 }
 
-void AlarmApplication::setRelay(bool active)
+void AlarmApplication::activateScheduledRelay(uint16_t durationSeconds)
 {
+  // Overlapping bells keep the relay on until the later one ends.
+  const uint32_t requestedOffAt =
+    millis() + static_cast<uint32_t>(durationSeconds) * 1000UL;
+  if (!scheduledRelayActive_
+      || static_cast<int32_t>(requestedOffAt - scheduledRelayOffAt_) > 0) {
+    scheduledRelayOffAt_ = requestedOffAt;
+  }
+  scheduledRelayActive_ = true;
+  updateRelayOutput();
+}
+
+void AlarmApplication::updateRelayOutput()
+{
+  const bool active = scheduledRelayActive_ || countdownRelayActive_;
   const uint8_t activeLevel = AppConfig::Alarm::relayActiveHigh ? HIGH : LOW;
   digitalWrite(
     AppConfig::Alarm::relayPin,
     active ? activeLevel : static_cast<uint8_t>(!activeLevel));
-  relayActive_ = active;
+  relayOutputActive_ = active;
 }
 
 

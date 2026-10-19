@@ -6,7 +6,7 @@
 #include "AppConfig.h"
 #include "FontModel.h"
 
-constexpr uint16_t contentSchemaVersion = 7;
+constexpr uint16_t contentSchemaVersion = 8;
 constexpr uint8_t maxBoxesPerPanel = 2;
 constexpr uint8_t maxTextBoxesPerPanel = maxBoxesPerPanel;
 constexpr uint8_t maxContentItems = AppConfig::maxPanelCount * maxBoxesPerPanel;
@@ -25,11 +25,14 @@ enum class ContentType : uint8_t {
   time = 1,
   date = 2,
   temperature = 3,
-  humidity = 4
+  humidity = 4,
+  // Countdown timer; never part of a content cycle.
+  countdown = 5
 };
 
+constexpr ContentType lastContentType = ContentType::countdown;
 // Content cycle order follows the enum values up to this type.
-constexpr ContentType lastContentType = ContentType::humidity;
+constexpr ContentType lastCycleContentType = ContentType::humidity;
 
 constexpr uint8_t contentTypeMask(ContentType type)
 {
@@ -45,6 +48,12 @@ constexpr uint8_t allCycleContentMask =
 constexpr uint16_t minimumCycleIntervalSeconds = 1;
 constexpr uint16_t maximumCycleIntervalSeconds = 3600;
 constexpr uint16_t defaultCycleIntervalSeconds = 5;
+
+// Countdown durations up to 23:59:59; the relay runs 0-3600 s at zero.
+constexpr uint32_t maximumCountdownSeconds = 23UL * 3600UL + 59UL * 60UL + 59UL;
+constexpr uint32_t defaultCountdownSeconds = 40UL * 60UL;
+constexpr uint16_t maximumCountdownAlarmSeconds = 3600;
+constexpr uint16_t defaultCountdownAlarmSeconds = 10;
 
 enum class ScrollDirection : uint8_t {
   left = 0,
@@ -117,6 +126,10 @@ struct ContentItemSettings {
   // Float: digits after the decimal point. Integer: fixed decimal point
   // position, e.g. 1234 with 2 decimals is shown as 12.34.
   uint8_t valueDecimals = 0;
+  // Countdown TextBox: duration, and how long the alarm relay runs when the
+  // countdown reaches zero (0 = no relay).
+  uint32_t countdownSeconds = defaultCountdownSeconds;
+  uint16_t countdownAlarmSeconds = defaultCountdownAlarmSeconds;
 };
 
 struct ContentSettings {
