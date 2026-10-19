@@ -75,18 +75,38 @@ void BootGuardService::update()
   if (firmwareConfirmed_ && (!ready_ || counterCleared_)) {
     return;
   }
-  if (millis() - bootStartedAt_ < AppConfig::bootStableDurationMs) {
-    return;
-  }
+  const uint32_t uptime = millis() - bootStartedAt_;
 
   // Independent of the failure counter: a planned restart into new firmware
   // leaves the counter clear, yet that firmware still has to be confirmed.
-  if (!firmwareConfirmed_) {
+  // It is confirmed once it has run for a short while and a browser reached
+  // the portal (the page reloads itself after an update), or after the
+  // stable period at the latest.
+  if (!firmwareConfirmed_
+      && uptime >= AppConfig::firmwareConfirmMinimumMs
+      && (portalActive_ || uptime >= AppConfig::bootStableDurationMs)) {
     confirmRunningFirmware();
   }
-  if (ready_ && !counterCleared_ && resetCounter()) {
+  if (uptime >= AppConfig::bootStableDurationMs
+      && ready_
+      && !counterCleared_
+      && resetCounter()) {
     Serial.println("Boot guard counter cleared after 60 seconds of stable operation.");
   }
+}
+
+void BootGuardService::reportPortalActivity()
+{
+  portalActive_ = true;
+}
+
+bool BootGuardService::firmwareAwaitingConfirmation() const
+{
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  return running != nullptr
+      && esp_ota_get_state_partition(running, &state) == ESP_OK
+      && state == ESP_OTA_IMG_PENDING_VERIFY;
 }
 
 void BootGuardService::prepareForPlannedRestart()

@@ -15,7 +15,7 @@
 #endif
 
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "0.13.2"
+#define FIRMWARE_VERSION "0.13.3"
 #endif
 
 namespace AppConfig {
@@ -158,6 +158,9 @@ constexpr uint32_t startupColorDurationMs = 500;
 constexpr uint32_t watchdogTimeoutMs = 20000;
 constexpr uint8_t bootFailureLimit = 5;
 constexpr uint32_t bootStableDurationMs = 60000;
+// New firmware runs on trial until it is confirmed: at least this long after
+// boot and once a browser reached the portal, or after bootStableDurationMs.
+constexpr uint32_t firmwareConfirmMinimumMs = 10000;
 constexpr uint32_t rtcPollIntervalMs = 100;
 constexpr uint8_t clockColorRed = 255;
 constexpr uint8_t clockColorGreen = 0;

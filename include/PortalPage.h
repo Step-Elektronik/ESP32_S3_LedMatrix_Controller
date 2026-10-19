@@ -1786,6 +1786,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
       <div class="online-update">
         <h3 class="subsection-title">Çevrimiçi güncelleme</h3>
         <p class="sta-warning" id="online-update-rollback" role="alert" hidden></p>
+        <p class="sta-warning" id="online-update-pending" role="status" hidden>Yeni firmware doğrulanıyor; birkaç saniye içinde kalıcı hale gelecek. Bu sırada cihazın elektriğini kesmeyin.</p>
         <div class="wifi-connection" id="online-update-status" data-state="waiting" role="status" aria-live="polite">
           <span class="wifi-dot" aria-hidden="true"></span>
           <span class="wifi-copy">
@@ -1806,7 +1807,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
           <input id="onlineUpdateAuto" type="checkbox" value="1">
           Güncellemeleri otomatik denetle (günde bir kez)
         </label>
-        <p class="sleep-hint">Cihaz STA ağı üzerinden internete bağlıyken GitHub üzerinde yayınlanan son firmware'i denetler. Yeni sürüm yalnızca siz onayladığınızda indirilip kurulur. Yeni firmware ilk 60 saniye içinde kapanır veya yeniden başlarsa cihaz önceki sürüme döner.</p>
+        <p class="sleep-hint">Cihaz STA ağı üzerinden internete bağlıyken GitHub üzerinde yayınlanan son firmware'i denetler. Yeni sürüm yalnızca siz onayladığınızda indirilip kurulur. Kurulumdan sonra sayfa yeniden açıldığında yeni firmware birkaç saniye içinde kalıcı hale gelir; bundan önce elektrik kesilirse cihaz önceki sürüme döner.</p>
         <div class="actions">
           <button class="button secondary" id="online-update-check" type="button">Şimdi Denetle</button>
           <button class="button" id="online-update-install" type="button" hidden>Güncelle</button>
@@ -2921,6 +2922,8 @@ R"HTML(</footer>
       byId('online-update-value').value = percent + '%';
       byId('online-update-track').setAttribute('aria-valuenow', String(percent));
       byId('firmware-tab-badge').hidden = !data.updateAvailable || data.state === 'installed';
+      // Older firmware does not report the field; treat it as confirmed.
+      byId('online-update-pending').hidden = data.confirmed !== false;
     }
 
     function applyOnlineUpdate(data) {
@@ -2931,8 +2934,10 @@ R"HTML(</footer>
         return;
       }
       if (data.state === 'installed' || data.state === 'downloading') installingVersion = data.latest;
+      const wasPending = Boolean(onlineUpdateData) && onlineUpdateData.confirmed === false;
       onlineUpdateData = data;
       renderOnlineUpdate();
+      if (wasPending && data.confirmed !== false) showStatus('Yeni firmware kalıcı hale getirildi.');
     }
 
     async function loadOnlineUpdate() {
@@ -2941,7 +2946,9 @@ R"HTML(</footer>
         try { applyOnlineUpdate(await request('/api/firmware/online')); }
         catch (error) { /* Retried by the next poll, e.g. while the device restarts. */ }
       }
-      const fast = onlineUpdateBusy(onlineUpdateData) || Boolean(installingVersion);
+      const fast = onlineUpdateBusy(onlineUpdateData)
+        || Boolean(installingVersion)
+        || (Boolean(onlineUpdateData) && onlineUpdateData.confirmed === false);
       onlineUpdateTimer = setTimeout(loadOnlineUpdate, fast ? 2000 : 15000);
     }
 

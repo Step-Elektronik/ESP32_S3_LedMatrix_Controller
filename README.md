@@ -8,7 +8,7 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 
 | Özellik | Değer |
 |---|---|
-| Firmware sürümü | `0.13.2` |
+| Firmware sürümü | `0.13.3` |
 | Mikrodenetleyici hedefi | ESP32-S3 |
 | PlatformIO kartı | `esp32-s3-devkitc1-n8r2` |
 | Önerilen modül | ESP32-S3-WROOM-1-N8R2 |
@@ -544,7 +544,7 @@ STA girişi açıksa yerel ağdan yapılan güncelleme portal girişini gerektir
 
 ### Yeni firmware'in onaylanması ve geri dönüş
 
-Yeni firmware (dosyadan veya çevrimiçi kurulmuş) ilk açılışında “doğrulama bekliyor” durumundadır. Cihaz 60 saniye kararlı çalıştığında veya planlı bir yeniden başlatma yapıldığında firmware onaylanır. Onaydan önce panik, watchdog, brownout ya da elektrik kesintisiyle yeniden başlarsa bootloader önceki firmware'i açar. Bu nedenle güncellemeden sonraki ilk dakika cihazın elektriği kesilmemelidir. Çevrimiçi kurulan bir sürüm açılamazsa Yazılım Güncelleme bölümünde “… sürümü başlatılamadı; cihaz önceki sürüme döndü.” uyarısı görünür.
+Yeni firmware (dosyadan veya çevrimiçi kurulmuş) ilk açılışında “doğrulama bekliyor” durumundadır. Firmware en az 10 saniye çalıştıktan sonra bir tarayıcı portala eriştiğinde onaylanır; güncellemeden sonra sayfa kendiliğinden yenilendiği için bu genellikle cihaz açıldıktan birkaç saniye sonra olur. Portal açılmazsa onay 60 saniye sonra, planlı bir yeniden başlatmada ise hemen yapılır. Onay beklenirken Yazılım Güncelleme bölümünde “Yeni firmware doğrulanıyor…” uyarısı görünür, onaydan sonra kaybolur. Onaydan önce panik, watchdog, brownout ya da elektrik kesintisiyle yeniden başlarsa bootloader önceki firmware'i açar ve Yazılım Güncelleme bölümünde “… sürümü başlatılamadı; cihaz önceki sürüme döndü.” uyarısı görünür.
 
 ## Çevrimiçi güncelleme (GitHub)
 

@@ -8,8 +8,12 @@ public:
   bool begin();
   void update();
   void prepareForPlannedRestart();
+  // A browser reached the portal, so Wi-Fi and the web server work.
+  void reportPortalActivity();
 
   bool factoryResetRequired() const;
+  // True while freshly installed firmware still runs on trial.
+  bool firmwareAwaitingConfirmation() const;
 
 private:
   bool resetCounter();
@@ -21,6 +25,7 @@ private:
   bool ready_ = false;
   bool counterCleared_ = false;
   bool firmwareConfirmed_ = false;
+  bool portalActive_ = false;
   bool factoryResetRequired_ = false;
 };
 

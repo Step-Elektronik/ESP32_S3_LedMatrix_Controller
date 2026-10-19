@@ -683,6 +683,7 @@ void PortalApplication::onAuthorized(
 {
   webServer_.on(uri, method, [this, handler]() {
     if (authorize()) {
+      bootGuard_.reportPortalActivity();
       (this->*handler)();
     }
   });
@@ -1059,6 +1060,8 @@ String PortalApplication::buildOnlineUpdateJson(const String &message) const
   json += stateNames[static_cast<uint8_t>(status.state)];
   json += F("\",\"updateAvailable\":");
   json += status.updateAvailable ? F("true") : F("false");
+  json += F(",\"confirmed\":");
+  json += bootGuard_.firmwareAwaitingConfirmation() ? F("false") : F("true");
   json += F(",\"automatic\":");
   json += status.automaticCheck ? F("true") : F("false");
   json += F(",\"stationConnected\":");
