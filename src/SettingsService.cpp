@@ -7,6 +7,7 @@
 
 #include "AppConfig.h"
 #include "CalendarDate.h"
+#include "DeviceIdentity.h"
 #include "UiText.h"
 
 namespace {
@@ -688,6 +689,10 @@ bool SettingsService::begin()
     preferences_.getUChar(
       "panel_chain",
       static_cast<uint8_t>(panel_.connectionStyle)));
+  panel_.type = static_cast<PanelType>(
+    preferences_.getUChar("panel_type", static_cast<uint8_t>(panel_.type)));
+  panel_.hub12DataInverted = preferences_.getBool("hub12_data_inv", panel_.hub12DataInverted);
+  panel_.hub12OeInverted = preferences_.getBool("hub12_oe_inv", panel_.hub12OeInverted);
 
   network_.apSsid = preferences_.getString("ap_ssid", network_.apSsid);
   network_.apPassword = preferences_.getString("ap_pass", network_.apPassword);
@@ -762,6 +767,13 @@ bool SettingsService::begin()
   alarmMode_ = alarmModeRepaired
     ? AlarmMode::manual
     : static_cast<AlarmMode>(storedAlarmMode);
+
+  // A damaged name falls back to the MAC based default.
+  deviceName_ = preferences_.getString("dev_name", "");
+  String deviceNameError;
+  if (!validateDeviceName(deviceName_, deviceNameError)) {
+    deviceName_ = "";
+  }
 
   timeSync_.ntpEnabled = preferences_.getBool("ntp_enabled", timeSync_.ntpEnabled);
   timeSync_.ntpServer = preferences_.getString("ntp_server", timeSync_.ntpServer);
@@ -1053,6 +1065,11 @@ AlarmMode SettingsService::alarmMode() const
   return alarmMode_;
 }
 
+String SettingsService::deviceName() const
+{
+  return deviceName_.isEmpty() ? DeviceIdentity::defaultName() : deviceName_;
+}
+
 const ContentSettings &SettingsService::content() const
 {
   return content_;
@@ -1077,7 +1094,10 @@ bool SettingsService::savePanel(const PanelSettings &settings)
     && preferences_.putUChar("panel_light", settings.brightness) == 1
     && preferences_.putUChar(
       "panel_chain",
-      static_cast<uint8_t>(settings.connectionStyle)) == 1;
+      static_cast<uint8_t>(settings.connectionStyle)) == 1
+    && preferences_.putUChar("panel_type", static_cast<uint8_t>(settings.type)) == 1
+    && preferences_.putBool("hub12_data_inv", settings.hub12DataInverted) == 1
+    && preferences_.putBool("hub12_oe_inv", settings.hub12OeInverted) == 1;
   if (stored) {
     panel_ = settings;
   }
@@ -1233,6 +1253,23 @@ bool SettingsService::saveAlarmMode(AlarmMode mode)
   return true;
 }
 
+bool SettingsService::saveDeviceName(const String &name)
+{
+  String error;
+  if (!ready_ || !validateDeviceName(name, error)) {
+    return false;
+  }
+  if (name.isEmpty()) {
+    if (preferences_.isKey("dev_name") && !preferences_.remove("dev_name")) {
+      return false;
+    }
+  } else if (preferences_.putString("dev_name", name) != name.length()) {
+    return false;
+  }
+  deviceName_ = name;
+  return true;
+}
+
 bool SettingsService::saveContent(const ContentSettings &settings)
 {
   String error;
@@ -1305,6 +1342,14 @@ bool SettingsService::validatePanel(const PanelSettings &settings, String &error
   if (connectionStyle < static_cast<uint8_t>(PanelConnectionStyle::topLeftDown)
       || connectionStyle > static_cast<uint8_t>(PanelConnectionStyle::bottomLeftUpZigzag)) {
     error = UI_TEXT("Panel bağlantı şekli geçersiz.");
+    return false;
+  }
+  if (static_cast<uint8_t>(settings.type) > static_cast<uint8_t>(PanelType::monoHub12)) {
+    error = UI_TEXT("Panel tipi geçersiz.");
+    return false;
+  }
+  if (settings.type == PanelType::monoHub12 && settings.scanDivisor != 4) {
+    error = UI_TEXT("Tek renk HUB12 paneller yalnızca 1/4 tarama ile desteklenir.");
     return false;
   }
   error.clear();
@@ -1512,6 +1557,23 @@ bool SettingsService::validateAlarms(
     }
   }
 
+  error.clear();
+  return true;
+}
+
+bool SettingsService::validateDeviceName(const String &name, String &error)
+{
+  if (name.length() > AppConfig::maxDeviceNameBytes) {
+    error = UI_TEXT("Cihaz adı en fazla 32 bayt olabilir.");
+    return false;
+  }
+  for (size_t index = 0; index < name.length(); ++index) {
+    const uint8_t character = static_cast<uint8_t>(name[index]);
+    if (character < 0x20 || character == 0x7F) {
+      error = UI_TEXT("Cihaz adı kontrol karakteri içeremez.");
+      return false;
+    }
+  }
   error.clear();
   return true;
 }
@@ -1804,5 +1866,6 @@ void SettingsService::loadDefaults()
   initializeDefaultAlarms(alarms_);
   schoolBell_ = SchoolBellSettings{};
   alarmMode_ = AlarmMode::manual;
+  deviceName_ = "";
   initializeDefaultContent(content_);
 }

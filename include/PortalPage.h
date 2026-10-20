@@ -272,7 +272,7 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
           </div>
           <p class="cycle-note" id="cycleCountdownNote" hidden>Geri sayım içerik döngüsüne eklenemez.</p>
           <div class="cycle-options" id="cycleOptions" hidden>
-            <p class="cycle-note">İşaretlenen bilgiler Yazı → Saat → Tarih → Sıcaklık → Nem sırasıyla gösterilir. Kayar yazı açıksa içerik tam turunu tamamladıktan sonra değişir.</p>
+            <p class="cycle-note">İşaretlenen bilgiler Yazı → Saat → Tarih → Sıcaklık → Nem sırasıyla gösterilir. Kayar yazı açıksa içerik, yazı alandan çıktığında değişir ve yeni içerik kenardan kayarak girer.</p>
             <div class="cycle-choices">
               <label class="cycle-choice"><input type="checkbox" data-cycle-type="0"><span>Yazı</span></label>
               <label class="cycle-choice"><input type="checkbox" data-cycle-type="1"><span>Saat</span></label>
@@ -359,6 +359,7 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
           <div class="field">
             <span class="field-title">Renk</span>
             <div class="color-row"><input id="itemColor" type="color" value="#ff0000"><span class="color-code" id="colorCode">#FF0000</span></div>
+            <div class="card-note" id="monochromeNote" hidden>Tek renk panelde siyah dışındaki bütün renkler panelin kendi renginde yanar; renk RGB panele geçildiğinde kullanılır.</div>
           </div>
           <div class="field switch-row">
             <div><span class="field-title">Kayar yazı</span><div class="card-note">Ekran yenilenmesini engellemeden hareket eder</div></div>
@@ -438,6 +439,12 @@ R"HTML(</span></footer>
       function selectedItem() { return state.items.find(item => item.id === state.selectedId) || null; }
       function toHex(value) { return Number(value).toString(16).padStart(2,'0'); }
       function itemColor(item) { return '#' + toHex(item.red) + toHex(item.green) + toHex(item.blue); }
+      // Mirrors PanelDisplay::color565: a single-colour panel lights every
+      // colour except black; the preview shows it in red, the usual LED colour.
+      function previewColor(item) {
+        if (!state.monochrome) return itemColor(item);
+        return item.red || item.green || item.blue ? '#ff2a1a' : '#000000';
+      }
       function cycleTypes(item) { return [0,1,2,3,4].filter(type => (item.cycleMask & (1<<type)) !== 0); }
       function usesHumidity(item) { return item.kind===0 && (item.cycleEnabled ? (item.cycleMask&humidityMask)!==0 : item.type===4); }
       function activeType(item) {
@@ -553,11 +560,28 @@ R"HTML(</span></footer>
           ? {width:layout.height,height:layout.width}
           : {width:layout.width,height:layout.height};
       }
+      function clipRect(item) {
+        if(item.scrollArea!==0) return {left:0,top:0,right:width(),bottom:height()};
+        const left=(item.panel%state.columns)*PW, top=Math.floor(item.panel/state.columns)*PH;
+        return {left,top,right:left+PW,bottom:top+PH};
+      }
+      // Mirrors PanelContentApplication::calculateAlignedOrigin: cycled types
+      // are centred on the visible part of the reference type's box, which is
+      // the box's own type while it is part of the cycle.
+      function referenceType(item) {
+        if((item.cycleMask&(1<<item.type))!==0) return item.type;
+        const types=cycleTypes(item);
+        return types.length?types[0]:item.type;
+      }
       function alignedOrigin(item) {
         if(!item.cycleEnabled) return {x:item.x,y:item.y};
-        const reference=previewTextSize(item,item.type);
-        const active=previewTextSize(item,activeType(item));
-        return {x:item.x+Math.trunc((reference.width-active.width)/2),y:item.y+Math.trunc((reference.height-active.height)/2)};
+        const reference=referenceType(item), type=activeType(item);
+        if(type===reference) return {x:item.x,y:item.y};
+        const box=previewTextSize(item,reference), active=previewTextSize(item,type), clip=clipRect(item);
+        const left=Math.max(item.x,clip.left), right=Math.min(item.x+box.width,clip.right);
+        const top=Math.max(item.y,clip.top), bottom=Math.min(item.y+box.height,clip.bottom);
+        return {x:right>left?left+Math.trunc((right-left-active.width)/2):item.x,
+          y:bottom>top?top+Math.trunc((bottom-top-active.height)/2):item.y};
       }
       function positionPreviewNode(node,item,sx,sy) {
         const origin=alignedOrigin(item);
@@ -588,7 +612,7 @@ R"HTML(</span></footer>
         canvas.style.width=(Math.max(1,visualWidth)*sx)+'px';
         canvas.style.height=(Math.max(1,visualHeight)*sy)+'px';
         if(!layout.font || !layout.width || !layout.height) return;
-        const context=canvas.getContext('2d'); context.fillStyle=itemColor(item);
+        const context=canvas.getContext('2d'); context.fillStyle=previewColor(item);
         const hideColon=item.kind===0&&type===1&&(Math.floor(Date.now()/1000)&1)!==0;
         let cursorX=0, cursorY=0;
         for(const code of layout.codes) {
@@ -657,7 +681,7 @@ R"HTML(</span></footer>
           node.className = 'display-item'
             + (item.id === state.selectedId ? ' selected' : '');
           node.dataset.id = item.id;
-          node.style.color = itemColor(item);
+          node.style.color = previewColor(item);
           const canvas=document.createElement('canvas');
           canvas.setAttribute('aria-label',liveText(item));
           node.appendChild(canvas);
@@ -817,6 +841,7 @@ R"HTML(</span></footer>
         $('itemRotation').value=item.rotation;
         $('itemScrollArea').value=item.scrollArea;
         $('itemColor').value=itemColor(item); $('colorCode').textContent=itemColor(item).toUpperCase();
+        $('monochromeNote').hidden=!state.monochrome;
         $('scrollEnabled').checked=item.scrolling;
         $('scrollDirection').value=item.direction; $('scrollDirection').disabled=!item.scrolling;
         $('scrollSpeed').value=item.speed; $('scrollSpeed').disabled=!item.scrolling;
@@ -859,7 +884,10 @@ R"HTML(</span></footer>
         const bit=1<<Number(event.target.dataset.cycleType);
         const nextMask=event.target.checked?item.cycleMask|bit:item.cycleMask&~bit;
         if(!nextMask){ event.target.checked=true; setStatus('Döngü için en az bir bilgi seçilmelidir.','error'); return; }
-        item.cycleMask=nextMask; item._cycleStartedAt=Date.now(); syncEditor(); renderStage();
+        item.cycleMask=nextMask;
+        // A type taken out of the cycle no longer stays the box's own type.
+        if((nextMask&(1<<item.type))===0) item.type=cycleTypes(item)[0];
+        item._cycleStartedAt=Date.now(); syncEditor(); renderStage();
       }));
       $('cycleInterval').addEventListener('input',event => { const item=selectedItem(); if(item){ item.cycleInterval=Number(event.target.value); item._cycleStartedAt=Date.now(); renderStage(); } });
       $('textValue').addEventListener('input',event => { const item=selectedItem(); if(item){ item.text=event.target.value; renderStage(); } });
@@ -923,6 +951,7 @@ R"HTML(</span></footer>
         try {
           const data=await request('/api/content');
           state.rows=data.panel.rows; state.columns=data.panel.columns; state.maxPerPanel=data.panel.maxPerPanel;
+          state.monochrome=Boolean(data.panel.monochrome);
           if(data.sensor) state.sensor={type:Number(data.sensor.type), name:String(data.sensor.name), humidity:Boolean(data.sensor.humidity), missingText:String(data.sensor.missingText)};
           state.fonts=Array.isArray(data.fonts)?data.fonts:[];
           state.defaultFont=Number.isInteger(Number(data.defaultFont))?Number(data.defaultFont):2;
@@ -1415,13 +1444,29 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
 
     <section class="panel active" id="panel-section">
       <h2>Panel Ayarları</h2>
-      <p class="note">Tarama ve yerleşim değişiklikleri kaydedildikten sonra cihaz otomatik yeniden başlar.</p>
+      <p class="note">Panel tipi, tarama ve yerleşim değişiklikleri kaydedildikten sonra cihaz otomatik yeniden başlar ve seçilen panel tipiyle çalışır.</p>
       <form id="panel-form">
         <div class="grid">
+          <div class="field">
+            <label for="panelType">Panel tipi</label>
+            <select id="panelType" name="panelType"><option value="0">RGB panel (HUB75)</option><option value="1">Tek renk panel (HUB12)</option></select>
+          </div>
           <div class="field">
             <label for="scan">Panel yenileme / tarama oranı</label>
             <select id="scan" name="scan"><option value="4">1/4</option><option value="8">1/8</option></select>
           </div>
+          <fieldset id="hub12-options" hidden>
+            <legend>HUB12 sinyalleri</legend>
+            <label class="sleep-toggle" for="hub12DataInverted">
+              <input id="hub12DataInverted" type="checkbox" value="1">
+              Veri hattı aktif düşük (çoğu P10 modül)
+            </label>
+            <label class="sleep-toggle" for="hub12OeInverted">
+              <input id="hub12OeInverted" type="checkbox" value="1">
+              OE aktif yüksek (çoğu P10 modül)
+            </label>
+            <p class="sleep-hint">Kartta HUB12 konnektörünün R, G ve D hatları R1, G1 ve B1'e bağlıdır; OE, A, B, C, CLK ve LAT RGB konnektörüyle ortaktır. 32×16 boyutlu, 1/4 taramalı tek renk P10 modüller desteklenir ve tarama oranı 1/4'e sabitlenir. Panel tamamen yanık kalıyor ya da hiç yanmıyorsa veri hattı seçeneğini, parlaklık ters çalışıyorsa OE seçeneğini değiştirin.</p>
+          </fieldset>
           <div class="field">
             <label for="count">Panel sayısı</label>
             <input id="count" readonly value="1">
@@ -1484,6 +1529,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
               <button type="button" class="button test-green" data-color="green">Yeşil</button>
               <button type="button" class="button test-blue" data-color="blue">Mavi</button>
             </div>
+            <p class="sleep-hint" id="mono-test-hint" hidden>Tek renk panelde üç düğme de bütün LED'leri yakar; test, kayıtlı panel tipine göre yapılır.</p>
           </div>
         </div>
         <div class="actions"><button class="button" type="submit">Panel Ayarlarını Kaydet</button></div>
@@ -1754,7 +1800,17 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
         </span>
         <code class="wifi-ip" id="wifi-ip" hidden></code>
       </div>
-      <form id="wifi-form">
+      <form id="device-form">
+        <div class="grid">
+          <div class="field full">
+            <label for="deviceName">Cihaz adı</label>
+            <input id="deviceName" name="deviceName" maxlength="32" autocomplete="off">
+            <p class="sleep-hint" id="device-name-hint"></p>
+          </div>
+        </div>
+        <div class="actions"><button class="button" type="submit">Cihaz Adını Kaydet</button></div>
+      </form>
+      <form id="wifi-form" class="section-form">
         <div class="grid">
           <p class="sta-warning" id="default-password-warning" role="note" hidden><span aria-hidden="true">&#9888;</span><span>Varsayılan AP parolası kullanılıyor. Cihazı devreye almadan önce parolayı değiştirin.</span></p>
           <fieldset>
@@ -2594,8 +2650,30 @@ R"HTML(</footer>
         : 'Açık ağ için boş bırakılabilir');
     }
 
+    let deviceInfo = null;
+    function renderDeviceNameHint() {
+      if (!deviceInfo) return;
+      byId('deviceName').placeholder = deviceInfo.defaultName;
+      byId('device-name-hint').textContent = t('Cihaz yöneticisi sayfasında bu adla görünür; boş bırakılırsa {name} kullanılır. Yerel ağ adresi: {host}.local', {name:deviceInfo.defaultName, host:deviceInfo.hostname});
+    }
+
+    let storedPanelType = 0;
+    function updatePanelTypeControls() {
+      const mono = byId('panelType').value === '1';
+      byId('hub12-options').hidden = !mono;
+      // HUB12 modules supported here are 1/4 scan only.
+      if (mono) byId('scan').value = '4';
+      byId('scan').disabled = mono;
+      byId('mono-test-hint').hidden = storedPanelType !== 1;
+    }
+    byId('panelType').addEventListener('change', updatePanelTypeControls);
+
     function applySettings(data, initial) {
+      storedPanelType = Number(data.panel.type) === 1 ? 1 : 0;
       if (initial) {
+        byId('panelType').value = String(storedPanelType);
+        byId('hub12DataInverted').checked = data.panel.hub12DataInverted !== false;
+        byId('hub12OeInverted').checked = data.panel.hub12OeInverted !== false;
         byId('scan').value = data.panel.scan;
         byId('rows').value = data.panel.rows;
         byId('columns').value = data.panel.columns;
@@ -2603,6 +2681,7 @@ R"HTML(</footer>
         byId('brightness-value').value = data.panel.brightness;
         selectConnection(data.panel.connectionStyle);
         updatePanelCount();
+        updatePanelTypeControls();
         byId('sleepEnabled').checked = Boolean(data.sleep.enabled);
         byId('sleepStart').value = data.sleep.start;
         byId('sleepEnd').value = data.sleep.end;
@@ -2639,6 +2718,12 @@ R"HTML(</footer>
         byId('staSsid').value = data.wifi.staSsid;
         byId('staPassword').value = '';
         byId('staAuthentication').checked = Boolean(data.wifi.staAuthentication);
+        if (data.device) {
+          deviceInfo = data.device;
+          // The default name is shown as the placeholder.
+          byId('deviceName').value = data.device.name === data.device.defaultName ? '' : data.device.name;
+          renderDeviceNameHint();
+        }
         wifiSettings = {staSsid: data.wifi.staSsid, staPasswordSet: Boolean(data.wifi.staPasswordSet)};
         renderStaPasswordPlaceholder();
       }
@@ -2704,6 +2789,16 @@ R"HTML(</footer>
         if (endpoint === '/api/settings/sleep') {
           body.set('sleepEnabled', byId('sleepEnabled').checked ? '1' : '0');
         }
+        if (endpoint === '/api/settings/device'
+            && new TextEncoder().encode(byId('deviceName').value.trim()).length > 32) {
+          throw new Error(t('Cihaz adı en fazla 32 bayt olabilir.'));
+        }
+        if (endpoint === '/api/settings/panel') {
+          // The disabled scan selector is not part of the form data.
+          body.set('scan', byId('panelType').value === '1' ? '4' : byId('scan').value);
+          body.set('hub12DataInverted', byId('hub12DataInverted').checked ? '1' : '0');
+          body.set('hub12OeInverted', byId('hub12OeInverted').checked ? '1' : '0');
+        }
         if (endpoint === '/api/settings/time-sync') {
           body.set('ntpEnabled', byId('ntpEnabled').checked ? '1' : '0');
           body.set('timeZone', selectedTimeZone());
@@ -2745,6 +2840,7 @@ R"HTML(</footer>
     byId('alarm-form').addEventListener('submit', event => submitForm(event, '/api/settings/alarms'));
     byId('communication-form').addEventListener('submit', event => submitForm(event, '/api/settings/communication'));
     byId('wifi-form').addEventListener('submit', event => submitForm(event, '/api/settings/wifi'));
+    byId('device-form').addEventListener('submit', event => submitForm(event, '/api/settings/device'));
     byId('add-alarm').addEventListener('click', () => addAlarm());
 
     const firmwareForm = byId('firmware-form');
@@ -3004,6 +3100,7 @@ R"HTML(</footer>
       if (wifiStatusData) renderWifiStatus(wifiStatusData);
       renderTimeSyncStatus();
       renderStaPasswordPlaceholder();
+      renderDeviceNameHint();
       renderSensorStatus(sensorStatusData);
       validateFirmwareFile();
     });

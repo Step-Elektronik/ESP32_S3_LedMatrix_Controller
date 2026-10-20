@@ -79,6 +79,12 @@ private:
   void saveCommunicationSettings();
   void saveNetworkSettings();
   void startPanelColorTest();
+  // Device manager: answered without login and with CORS, see
+  // web/cihaz-yoneticisi.html.
+  void sendDiscoveryJson();
+  void startIdentify();
+  void saveDeviceSettings();
+  void endPanelTest();
   void handleFirmwareUpload();
   void finishFirmwareUploadRequest();
   void sendOnlineUpdateJson();
@@ -119,6 +125,10 @@ private:
   WebServer webServer_;
   bool colorTestActive_ = false;
   uint32_t colorTestStartedAt_ = 0;
+  // Identify flashes the whole panel so the device can be found in a room.
+  bool identifyActive_ = false;
+  uint32_t identifyStartedAt_ = 0;
+  uint8_t identifyPhase_ = UINT8_MAX;
   bool restartPending_ = false;
   uint32_t restartScheduledAt_ = 0;
   bool uploadAuthorized_ = false;

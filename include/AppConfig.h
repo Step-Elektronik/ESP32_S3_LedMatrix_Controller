@@ -15,7 +15,7 @@
 #endif
 
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "0.13.3"
+#define FIRMWARE_VERSION "0.15.1"
 #endif
 
 namespace AppConfig {
@@ -24,7 +24,6 @@ constexpr uint32_t serialBaudRate = 115200;
 constexpr char firmwareVersion[] = FIRMWARE_VERSION;
 
 namespace Network {
-constexpr char hostname[] = "step-rgb";
 constexpr char apSsid[] = "STEP-RGB";
 constexpr char apPassword[] = "00000000";
 constexpr uint8_t apChannel = 1;
@@ -72,7 +71,8 @@ namespace Hub75Pins {
 // ESP32-S3 LCD_CAM/GDMA parallel output group. These pins are all exposed on
 // the DevKitC-1 J1 header and avoid USB, UART0, strapping, RGB LED and
 // flash/PSRAM-related pins. D and E are unused by the supported 1/4 and 1/8
-// scan panels.
+// scan panels. The HUB12 header shares OE, A, B, C, CLK and LAT and has its
+// R, G and D lines on r1, g1 and b1.
 constexpr int8_t r1 = 4;
 constexpr int8_t g1 = 5;
 constexpr int8_t b1 = 6;
@@ -157,6 +157,7 @@ constexpr uint8_t maxPanelCount = maxPanelRows * maxPanelColumns;
 constexpr uint32_t startupColorDurationMs = 500;
 constexpr uint32_t watchdogTimeoutMs = 20000;
 constexpr uint8_t bootFailureLimit = 5;
+constexpr size_t maxDeviceNameBytes = 32;
 constexpr uint32_t bootStableDurationMs = 60000;
 // New firmware runs on trial until it is confirmed: at least this long after
 // boot and once a browser reached the portal, or after bootStableDurationMs.

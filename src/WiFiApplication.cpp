@@ -1,9 +1,11 @@
 #include "WiFiApplication.h"
 
 #include <Arduino.h>
+#include <ESPmDNS.h>
 #include <WiFi.h>
 
 #include "AppConfig.h"
+#include "DeviceIdentity.h"
 #include "SettingsService.h"
 
 WiFiApplication::WiFiApplication(SettingsService &settings)
@@ -13,11 +15,15 @@ WiFiApplication::WiFiApplication(SettingsService &settings)
 
 bool WiFiApplication::begin()
 {
-  WiFi.setHostname(AppConfig::Network::hostname);
+  // A unique host name per device keeps routers' client lists readable when
+  // many controllers share one network.
+  hostname_ = DeviceIdentity::hostname();
+  WiFi.setHostname(hostname_.c_str());
   const bool wifiModeReady = WiFi.mode(WIFI_AP_STA);
   if (!wifiModeReady) {
     Serial.println("ERROR: WiFi AP+STA mode could not be enabled.");
   }
+  startMdns();
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(false);
   WiFi.disconnect(false, false);
@@ -83,6 +89,27 @@ bool WiFiApplication::startAccessPoint()
       static_cast<int>(appliedPower) / 4.0f);
   }
   return true;
+}
+
+void WiFiApplication::startMdns()
+{
+  // DNS-SD service "_step-rgb._tcp" marks these controllers for tools that
+  // browse the network; the device manager page uses /api/discover instead.
+  if (!MDNS.begin(hostname_.c_str())) {
+    Serial.println("ERROR: mDNS could not be started.");
+    return;
+  }
+  MDNS.addService("http", "tcp", AppConfig::Network::httpPort);
+  MDNS.addService("step-rgb", "tcp", AppConfig::Network::httpPort);
+  MDNS.addServiceTxt("step-rgb", "tcp", "id", DeviceIdentity::id().c_str());
+  MDNS.addServiceTxt("step-rgb", "tcp", "vendor", DeviceIdentity::signatureVendor);
+  MDNS.addServiceTxt("step-rgb", "tcp", "version", AppConfig::firmwareVersion);
+  Serial.printf("mDNS host name: %s.local\n", hostname_.c_str());
+}
+
+const String &WiFiApplication::hostname() const
+{
+  return hostname_;
 }
 
 bool WiFiApplication::startCaptiveDns()

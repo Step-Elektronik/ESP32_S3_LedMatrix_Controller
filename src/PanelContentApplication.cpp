@@ -117,12 +117,7 @@ void PanelContentApplication::update()
 
   for (uint8_t index = 0; index < content.count; ++index) {
     const ContentItemSettings &item = content.items[index];
-    updateScroll(
-      index,
-      item,
-      runtime_[index].activeType,
-      now,
-      redrawRequired);
+    updateScroll(index, item, now, redrawRequired);
     updateCycle(index, item, now, redrawRequired);
     const ContentType activeType = runtime_[index].activeType;
 
@@ -326,9 +321,13 @@ void PanelContentApplication::updateCycle(
     runtime.lastCycleChangeTime = now;
     runtime.scroll = {};
     runtime.scroll.lastStepTime = now;
-    runtime.scrollWrapped = false;
-    runtime.scrollTourCompleted = false;
     redrawRequired = true;
+    return;
+  }
+
+  // A scrolling box switches content in updateScroll, while its text is out
+  // of sight, so the next content scrolls in instead of jumping into place.
+  if (item.scrolling) {
     return;
   }
 
@@ -343,9 +342,6 @@ void PanelContentApplication::updateCycle(
     runtime.lastCycleChangeTime = now;
     return;
   }
-  if (item.scrolling && !runtime.scrollTourCompleted) {
-    return;
-  }
 
   runtime.activeType = advanceCycleType(
     item.cycleContentMask,
@@ -354,15 +350,28 @@ void PanelContentApplication::updateCycle(
   runtime.lastCycleChangeTime = now;
   runtime.scroll = {};
   runtime.scroll.lastStepTime = now;
-  runtime.scrollWrapped = false;
-  runtime.scrollTourCompleted = false;
   redrawRequired = true;
+}
+
+bool PanelContentApplication::cycleDue(
+  const ContentItemSettings &item,
+  const ItemRuntime &runtime,
+  uint32_t now) const
+{
+  if (item.boxKind != ContentBoxKind::textBox
+      || !item.cycleEnabled
+      || !cycleContains(item.cycleContentMask, runtime.activeType)
+      || cycleTypeCount(item.cycleContentMask) < 2) {
+    return false;
+  }
+  const uint32_t interval =
+    static_cast<uint32_t>(item.cycleIntervalSeconds) * 1000U;
+  return now - runtime.lastCycleChangeTime >= interval;
 }
 
 void PanelContentApplication::updateScroll(
   uint8_t index,
   const ContentItemSettings &item,
-  ContentType activeType,
   uint32_t now,
   bool &redrawRequired)
 {
@@ -381,81 +390,78 @@ void PanelContentApplication::updateScroll(
   const int16_t steps = static_cast<int16_t>(elapsed / interval);
   runtime.lastStepTime += static_cast<uint32_t>(steps) * interval;
 
-  char text[64] = {};
-  buildText(index, item, activeType, text, sizeof(text));
-  uint16_t textWidth = 0;
-  uint16_t textHeight = 0;
-  measureText(text, item.rotation, item.fontId, textWidth, textHeight);
+  int16_t textWidth = 0;
+  int16_t textHeight = 0;
   int16_t originX = item.x;
   int16_t originY = item.y;
-  calculateAlignedOrigin(
-    index,
-    item,
-    activeType,
-    textWidth,
-    textHeight,
-    originX,
-    originY);
+  const auto measureActive = [&]() {
+    char text[64] = {};
+    buildText(index, item, itemRuntime.activeType, text, sizeof(text));
+    uint16_t width = 0;
+    uint16_t height = 0;
+    measureText(text, item.rotation, item.fontId, width, height);
+    originX = item.x;
+    originY = item.y;
+    calculateAlignedOrigin(
+      index,
+      item,
+      itemRuntime.activeType,
+      width,
+      height,
+      originX,
+      originY);
+    textWidth = static_cast<int16_t>(width);
+    textHeight = static_cast<int16_t>(height);
+  };
+  measureActive();
 
   // Text leaves the box's area on one side and re-enters on the other: the
   // own panel, or the whole display for boxes set to use it.
   const ClipArea area = clipArea(item);
+  bool leftArea = false;
   switch (item.direction) {
-    case ScrollDirection::left: {
-      const int16_t previousOffset = runtime.offsetX;
+    case ScrollDirection::left:
       runtime.offsetX -= steps;
-      if (itemRuntime.scrollWrapped
-          && previousOffset > 0
-          && runtime.offsetX <= 0) {
-        itemRuntime.scrollTourCompleted = true;
-      }
-      if (originX + runtime.offsetX + static_cast<int16_t>(textWidth) < area.left) {
-        runtime.offsetX = area.right - originX;
-        itemRuntime.scrollWrapped = true;
-      }
+      leftArea = originX + runtime.offsetX + textWidth < area.left;
       break;
-    }
-    case ScrollDirection::right: {
-      const int16_t previousOffset = runtime.offsetX;
+    case ScrollDirection::right:
       runtime.offsetX += steps;
-      if (itemRuntime.scrollWrapped
-          && previousOffset < 0
-          && runtime.offsetX >= 0) {
-        itemRuntime.scrollTourCompleted = true;
-      }
-      if (originX + runtime.offsetX >= area.right) {
-        runtime.offsetX = area.left - static_cast<int16_t>(textWidth) - originX;
-        itemRuntime.scrollWrapped = true;
-      }
+      leftArea = originX + runtime.offsetX >= area.right;
       break;
-    }
-    case ScrollDirection::up: {
-      const int16_t previousOffset = runtime.offsetY;
+    case ScrollDirection::up:
       runtime.offsetY -= steps;
-      if (itemRuntime.scrollWrapped
-          && previousOffset > 0
-          && runtime.offsetY <= 0) {
-        itemRuntime.scrollTourCompleted = true;
-      }
-      if (originY + runtime.offsetY + static_cast<int16_t>(textHeight) < area.top) {
-        runtime.offsetY = area.bottom - originY;
-        itemRuntime.scrollWrapped = true;
-      }
+      leftArea = originY + runtime.offsetY + textHeight < area.top;
       break;
-    }
-    case ScrollDirection::down: {
-      const int16_t previousOffset = runtime.offsetY;
+    case ScrollDirection::down:
       runtime.offsetY += steps;
-      if (itemRuntime.scrollWrapped
-          && previousOffset < 0
-          && runtime.offsetY >= 0) {
-        itemRuntime.scrollTourCompleted = true;
-      }
-      if (originY + runtime.offsetY >= area.bottom) {
-        runtime.offsetY = area.top - static_cast<int16_t>(textHeight) - originY;
-        itemRuntime.scrollWrapped = true;
-      }
+      leftArea = originY + runtime.offsetY >= area.bottom;
       break;
+  }
+
+  if (leftArea) {
+    // The next cycle content enters from the edge where the text would
+    // have re-entered, so the change happens without a jump.
+    if (cycleDue(item, itemRuntime, now)) {
+      itemRuntime.activeType = advanceCycleType(
+        item.cycleContentMask,
+        itemRuntime.activeType,
+        1);
+      itemRuntime.lastCycleChangeTime = now;
+      measureActive();
+    }
+    switch (item.direction) {
+      case ScrollDirection::left:
+        runtime.offsetX = area.right - originX;
+        break;
+      case ScrollDirection::right:
+        runtime.offsetX = area.left - textWidth - originX;
+        break;
+      case ScrollDirection::up:
+        runtime.offsetY = area.bottom - originY;
+        break;
+      case ScrollDirection::down:
+        runtime.offsetY = area.top - textHeight - originY;
+        break;
     }
   }
   redrawRequired = true;
@@ -597,12 +603,22 @@ void PanelContentApplication::calculateAlignedOrigin(
 {
   originX = item.x;
   originY = item.y;
-  if (!item.cycleEnabled || activeType == item.type) {
+  if (!item.cycleEnabled) {
+    return;
+  }
+
+  // Cycled types are centred on the box of one reference type: the box's own
+  // type while it is part of the cycle, otherwise the first cycled type, so
+  // that a type that is never shown cannot move the others.
+  const ContentType reference = cycleContains(item.cycleContentMask, item.type)
+    ? item.type
+    : firstCycleType(item.cycleContentMask, item.type);
+  if (activeType == reference) {
     return;
   }
 
   char referenceText[64] = {};
-  buildText(index, item, item.type, referenceText, sizeof(referenceText));
+  buildText(index, item, reference, referenceText, sizeof(referenceText));
   uint16_t referenceWidth = 0;
   uint16_t referenceHeight = 0;
   measureText(
@@ -612,10 +628,23 @@ void PanelContentApplication::calculateAlignedOrigin(
     referenceWidth,
     referenceHeight);
 
-  originX += static_cast<int16_t>(
-    (static_cast<int32_t>(referenceWidth) - activeWidth) / 2);
-  originY += static_cast<int16_t>(
-    (static_cast<int32_t>(referenceHeight) - activeHeight) / 2);
+  // Only the visible part of the reference box counts, so a long (scrolling)
+  // text does not push the other types out of view.
+  const ClipArea area = clipArea(item);
+  const int32_t left = item.x > area.left ? item.x : area.left;
+  const int32_t right = item.x + static_cast<int32_t>(referenceWidth) < area.right
+    ? item.x + static_cast<int32_t>(referenceWidth)
+    : area.right;
+  const int32_t top = item.y > area.top ? item.y : area.top;
+  const int32_t bottom = item.y + static_cast<int32_t>(referenceHeight) < area.bottom
+    ? item.y + static_cast<int32_t>(referenceHeight)
+    : area.bottom;
+  if (right > left) {
+    originX = static_cast<int16_t>(left + (right - left - activeWidth) / 2);
+  }
+  if (bottom > top) {
+    originY = static_cast<int16_t>(top + (bottom - top - activeHeight) / 2);
+  }
 }
 
 void PanelContentApplication::drawRotatedText(

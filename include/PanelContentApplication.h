@@ -41,8 +41,6 @@ private:
     ScrollRuntime scroll;
     uint32_t lastCycleChangeTime = 0;
     ContentType activeType = ContentType::text;
-    bool scrollWrapped = false;
-    bool scrollTourCompleted = false;
   };
 
   // Pixel rectangle a box is clipped to; right and bottom are exclusive.
@@ -63,9 +61,12 @@ private:
   void updateScroll(
     uint8_t index,
     const ContentItemSettings &item,
-    ContentType activeType,
     uint32_t now,
     bool &redrawRequired);
+  bool cycleDue(
+    const ContentItemSettings &item,
+    const ItemRuntime &runtime,
+    uint32_t now) const;
   void buildText(
     uint8_t index,
     const ContentItemSettings &item,

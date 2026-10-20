@@ -1,6 +1,6 @@
 # ESP32-S3 RGB LED Matrix Controller
 
-ESP32-S3 tabanlı, 32×16 HUB75/P10 RGB LED paneller için web arayüzlü kontrol cihazı firmware'idir. Proje; metin, saat, tarih, sıcaklık, nem, geri sayım ve dışarıdan alınan sayısal değerleri bir veya daha fazla panel üzerinde konumlandırabilir. İçerik ayarları sürükle-bırak web editörüyle hazırlanır ve ESP32-S3'ün kalıcı belleğinde saklanır.
+ESP32-S3 tabanlı, 32×16 HUB75/P10 RGB ve HUB12/P10 tek renk LED paneller için web arayüzlü kontrol cihazı firmware'idir. Proje; metin, saat, tarih, sıcaklık, nem, geri sayım ve dışarıdan alınan sayısal değerleri bir veya daha fazla panel üzerinde konumlandırabilir. İçerik ayarları sürükle-bırak web editörüyle hazırlanır ve ESP32-S3'ün kalıcı belleğinde saklanır.
 
 Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek zaman saati, seçilebilir sıcaklık/nem sensörü (TMP112, SHT40, HDC2022), programlanabilir alarm rölesi ve okul zili (okul saati), panel uyku zamanlaması, Wi-Fi erişim noktası ve OTA güncelleme özelliklerini içerir.
 
@@ -8,14 +8,14 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 
 | Özellik | Değer |
 |---|---|
-| Firmware sürümü | `0.13.3` |
+| Firmware sürümü | `0.15.1` |
 | Mikrodenetleyici hedefi | ESP32-S3 |
 | PlatformIO kartı | `esp32-s3-devkitc1-n8r2` |
 | Önerilen modül | ESP32-S3-WROOM-1-N8R2 |
 | Flash / PSRAM hedefi | 8 MB Flash / 2 MB PSRAM |
 | Framework | Arduino |
 | Panel boyutu | 32×16 piksel |
-| Desteklenen tarama | 1/4 ve 1/8 scan |
+| Desteklenen tarama | RGB: 1/4 ve 1/8 scan; tek renk HUB12: 1/4 scan |
 | En fazla yerleşim | 4 satır × 4 sütun, toplam 16 panel |
 | Panel başına içerik | En fazla 2 TextBox/ValueBox |
 | Web arayüzü dilleri | Türkçe, İngilizce, Almanca, İspanyolca, Arapça |
@@ -23,6 +23,7 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 ## Temel özellikler
 
 - 32×16 HUB75/P10 RGB panel desteği
+- 32×16 HUB12/P10 tek renk panel desteği; panel tipi Panel Ayarları'ndan seçilir, cihaz yeniden başlayıp seçilen modda çalışır
 - ESP32-S3 LCD_CAM/GDMA tabanlı paralel panel çıkışı
 - 1/4 scan `P10RGB-3535-DP-4S` özel piksel eşlemesi
 - 1/8 scan standart iki taramalı panel eşlemesi
@@ -47,6 +48,7 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 - Geri sayım (örneğin sınav, toplantı veya yarışma süresi): saat/dakika/saniye süresi, web üzerinden Başlat/Durdur/Sıfırla, süre bitince ayarlanabilir süreyle alarm rölesi; elektrik kesintisinde DS3231 ile kaldığı yerden devam
 - Zamanlanmış panel karartma/uyku işlevi
 - AP+STA Wi-Fi, captive portal ve bağlantı durum göstergesi
+- Cihaz yöneticisi sayfası: aynı ağdaki bütün cihazları imzayla bulur, paneli yakıp söndürerek tanıtır ve her cihazın arayüzünü tek sayfadan açar; her cihazın adı ve `step-rgb-xxxx.local` ağ adı vardır
 - Web üzerinden `firmware.bin` OTA güncellemesi
 - GitHub üzerinden çevrimiçi güncelleme: master dalına yapılan her push otomatik derlenir; cihaz yeni sürümü bulur ve kullanıcının onayıyla kurar, yeni firmware açılmazsa önceki sürüme döner
 - İsteğe bağlı olarak yerel ağdan (STA) erişimde HTTP Digest girişi; kayıtlı parolalar tarayıcıya gönderilmez
@@ -107,6 +109,29 @@ Pinlerin tek yetkili kaynağı [`include/AppConfig.h`](include/AppConfig.h) dosy
 Kütüphane adı `ESP32 HUB75 LED MATRIX PANEL DMA Display` olsa da ESP32-S3 tarafında çıkış grubu LCD_CAM/GDMA paralel çevre birimi üzerinden sürülür. Sabit I²S pinleri yoktur; yukarıdaki GPIO eşlemesi firmware tarafından açıkça verilir.
 
 GPIO8'in `C` adres hattına atanması bilinçlidir. Sinyalleri GPIO numara sırasına göre yeniden dizmeyin.
+
+### HUB12 tek renk panel sinyalleri
+
+Kartta ikinci bir 8×2 konnektör HUB12 bağlantısı içindir. Ortak hatlar HUB75 ile aynı GPIO'yu kullanır; HUB12'nin veri hatları HUB75'in üst yarı veri hatlarına bağlıdır:
+
+| HUB12 sinyali | Kartta bağlı olduğu hat | ESP32-S3 GPIO | Açıklama |
+|---|---|---:|---|
+| OE | OE | GPIO10 | Çıkış etkinleştirme; çoğu P10 modülde aktif HIGH |
+| A | A | GPIO17 | Satır adresi A |
+| B | B | GPIO18 | Satır adresi B |
+| C | C | GPIO8 | 1/4 taramada hep LOW |
+| CLK | CLK | GPIO11 | Piksel saat sinyali |
+| LAT / STB | LAT | GPIO9 | Latch/Strobe |
+| R | R1 | GPIO4 | Veri; çoğu P10 modülde aktif LOW |
+| G | G1 | GPIO5 | İki renkli modüllerde yeşil; tek renkte kullanılmaz, “kapalı” seviyede tutulur |
+| D | B1 | GPIO6 | 1/16 tarama adres hattı; desteklenen 1/4 modüllerde hep LOW |
+
+HUB12 modunda aynı DMA sürücüsü kullanılır; farklı olan üç nokta vardır:
+
+- **Polarite:** DMA kütüphanesi HUB75 kurallarıyla çalışır (veri HIGH = LED açık, OE LOW = çıkış açık). HUB12 modunda R1, G1 ve OE sinyalleri ESP32-S3'ün GPIO matrisinde donanımsal olarak ters çevrilir; işlemciye ek yük getirmez. Her iki ters çevirme Panel Ayarları'ndan ayrı ayrı kapatılabilir.
+- **Tarama eşlemesi:** 32×16, 1/4 taramalı P10 modül her tarama satırında tek veri hattından 128 bit alır. Her 8 piksellik sütun bloğu için sırasıyla y+12, y+8, y+4 ve y satırlarının 8 pikseli gönderilir (Freetronics DMD kütüphanesiyle aynı sıra). DMA tarafında zincir tek bir geniş panel olarak tanımlanır (modül başına 128 piksel × 8 satır) ve yalnızca R1'e giden üst yarı kullanılır.
+- **Latch zamanlaması:** DMA kütüphanesi LAT'ı satırın son pikseliyle birlikte, o piksel kaydırılmadan yarım saat önce yükseltir. HUB75 sürücü entegreleri LAT yüksekken kilitlediği için bu sorun olmaz; HUB12 modüllerdeki 74HC595 ise LAT'ın yükselen kenarında kilitlenir ve son biti kaçırır. Bu durumda her piksel bir yazmaç kayar ve her 8 piksellik bloğun en sağdaki pikseli dört satır yukarıda görünür. Bunu önlemek için her satır, verinin önünde ve arkasında birer dolgu pikseliyle gönderilir; LAT arkadaki dolgu pikseline denk gelir.
+- **Renk:** Siyah dışındaki her renk LED'i yakar. Ara parlaklık seviyesi yoktur; parlaklık OE ile panelin tamamına uygulanır. DMA çerçevesi 2 bit renk derinliğiyle tutulur, böylece 16 modülde bile bellek kullanımı RGB'nin yarısıdır.
 
 ### I²C, RS485 ve yardımcı giriş/çıkışlar
 
@@ -265,7 +290,7 @@ TextBox aşağıdaki içerik türlerini gösterebilir:
 - Nem (SHT40 veya HDC2022 seçiliyken)
 - Geri sayım (içerik döngüsüne eklenemez)
 
-İçerik döngüsü etkinleştirilirse seçilen türler `Yazı → Saat → Tarih → Sıcaklık → Nem` sırasıyla gösterilir. Geçiş süresi 1–3600 saniye arasında seçilebilir. Kayar yazı açıkken içerik geçişi, mevcut içeriğin tam turu tamamlandıktan sonra yapılır.
+İçerik döngüsü etkinleştirilirse seçilen türler `Yazı → Saat → Tarih → Sıcaklık → Nem` sırasıyla gösterilir. Geçiş süresi 1–3600 saniye arasında seçilebilir. Kayar yazı açıkken geçiş süresi dolduktan sonra içerik, mevcut yazı gösterim alanından tamamen çıktığında değişir; yeni içerik yazının yeniden gireceği kenardan kayarak girer, böylece yazının konumu sıçramaz. Döngüdeki bilgiler kutunun kendi veri türüne göre ortalanır; bu tür döngüden çıkarılırsa ilk seçili tür esas alınır. Ortalamada esas alınan içeriğin yalnızca gösterim alanı içinde kalan kısmı hesaba katılır, böylece ekrandan uzun bir metin diğer bilgileri ekran dışına itmez.
 
 Metin alanının dahili kapasitesi 48 byte'tır; sonlandırıcı nedeniyle kullanıcı metni en fazla 47 UTF-8 byte olabilir. Türkçe karakterlerin birden fazla UTF-8 byte kullanabileceği unutulmamalıdır.
 
@@ -310,7 +335,7 @@ Gösterim seçenekleri:
 
 Ayarlar ekranı şu grupları içerir:
 
-- Panel tarama, boyut, parlaklık ve zincirleme yönü
+- Panel tipi (RGB HUB75 veya tek renk HUB12), tarama, boyut, parlaklık ve zincirleme yönü; tek renk seçildiğinde HUB12 veri ve OE polaritesi ayarlanabilir, tarama 1/4'e sabitlenir
 - RGB panel testi
 - DS3231 saat/tarih ayarı; alanlar cihaz saatiyle canlı ilerler
 - Telefon/bilgisayar saatini kullanma
@@ -318,7 +343,7 @@ Ayarlar ekranı şu grupları içerir:
 - Panel uyku zamanlaması; saat ayarından bağımsız kaydedilir
 - Alarm listesi
 - UART/Modbus haberleşme ayarları
-- Wi-Fi AP ve STA ayarları
+- Cihaz adı (cihaz yöneticisinde görünen ad), Wi-Fi AP ve STA ayarları
 - STA bağlantı durumu, IP ve sinyal kalitesi
 - OTA firmware güncellemesi
 
@@ -530,6 +555,27 @@ ESP32-S3 yalnızca 2.4 GHz Wi-Fi destekler. STA ağı 5 GHz-only olmamalıdır.
 - Seçenek açıldığında STA ağı üzerinden gelen her istek, OTA yüklemesi dahil, HTTP Digest kimlik doğrulaması ister: kullanıcı adı `admin`, parola cihazın AP parolasıdır. Firmware yüklemesinde kimlik ilk bayt flash'a yazılmadan önce kontrol edilir. Portal HTTPS kullanmadığı için Chrome bu girişte “bağlantınız gizli değil” uyarısı gösterir; bu, bağlantının şifrelenmediğini belirtir.
 - Kayıtlı AP ve STA parolaları `/api/settings` yanıtında gönderilmez; yalnızca STA parolasının kayıtlı olup olmadığı ve varsayılan AP parolasının kullanılıp kullanılmadığı bildirilir. Parola alanı boş bırakılırsa kayıtlı parola korunur; STA SSID değiştirilip parola boş bırakılırsa açık ağ kabul edilir.
 - Portal HTTP kullanır (TLS yoktur). Digest parolayı açık metin göndermez, ancak trafiğin geri kalanı şifrelenmez. Cihaz güvenilmeyen bir ağa doğrudan bağlanmamalıdır.
+- `/api/discover` ve `/api/identify` girişsiz yanıt verir (cihaz yöneticisinin cihazları listeleyebilmesi için). Tanıtım yanıtında parola veya ayar bulunmaz; identify yalnızca paneli birkaç saniye yakıp söndürür.
+
+## Cihaz yöneticisi (birden çok cihaz)
+
+Aynı ağda çok sayıda cihaz kullanılırken her birinin IP adresini tek tek bulmak gerekmez. [`web/cihaz-yoneticisi.html`](web/cihaz-yoneticisi.html) tek dosyalık bir sayfadır; bilgisayara kaydedip çift tıklayarak tarayıcıda açılır.
+
+- **Ağ taraması:** Taranacak ağ `192.168.1.0/24`, kısaca `192.168.1` ya da `192.168.1.20-192.168.1.80` biçiminde yazılır (en fazla 1024 adres). Sayfa her adresin `/api/discover` uç noktasını aynı anda 48 istekle sorar; /24'lük bir ağ birkaç saniyede taranır. Tek bir cihaz IP adresiyle de eklenebilir.
+- **Cihazların ayırt edilmesi:** Tarayıcıdaki bir sayfa Wi-Fi yayınlarını (beacon) ve onlara eklenebilecek üreticiye özel verileri okuyamaz; bu yüzden ayırt etme HTTP üzerinden yapılır. Her cihaz `/api/discover` yanıtında `"device":"STEP-RGB"` ve `"vendor":"Step Elektronik"` imzasını, MAC adresinden türetilen değişmez kimliğini, cihaz adını, sürümünü ve panel bilgisini bildirir. Yalnızca bu imzayı taşıyan yanıtlar listeye girer; kimlik sayesinde IP adresi değişen cihaz yine aynı kart olarak görünür. Ayrıca her cihaz mDNS ile `_step-rgb._tcp` servisini duyurur; DNS-SD destekleyen ağ araçları da cihazları bu servis türüyle ayırt edebilir.
+- **Kartlar:** Cihaz adı, IP adresi, `step-rgb-xxxx.local` ağ adı, sürüm, panel tipi ve yerleşimi, Wi-Fi sinyal gücü ve çalışma süresi gösterilir. GitHub'daki son sürümden eski cihazlarda “Güncelleme var” rozeti çıkar. Liste 15 saniyede bir yenilenir; iki kez yanıt vermeyen cihaz çevrimdışı görünür.
+- **Bul:** Seçilen cihazın paneli 6 saniye boyunca yanıp söner, böylece cihaz salonda kolayca bulunur.
+- **Editör / Ayarlar:** Cihazın kendi arayüzü sayfanın içinde açılır; “Yeni sekmede aç” ile ayrı sekmede de açılabilir. Bütün ayarlar cihazın kendi arayüzünden yapıldığı için yönetici sayfası her firmware özelliğini doğrudan destekler.
+- Taranan ağ ve bulunan cihazlar tarayıcıda hatırlanır; sayfa yeniden açıldığında bilinen cihazlar hemen yoklanır.
+
+Her cihazın adı Ayarlar → Wi-Fi Ayarları → **Cihaz adı** alanından verilir (en fazla 32 bayt, yeniden başlatma gerektirmez). Ad verilmezse `STEP-RGB-XXXX` kullanılır (XXXX: MAC adresinin son dört hanesi). Cihaz DHCP'de ve mDNS'te `step-rgb-xxxx` adını kullanır; Windows, macOS, iOS ve Android tarayıcılarında `http://step-rgb-xxxx.local/` adresi de çalışır.
+
+Sayfa çalışmazsa:
+
+- Sayfayı dosya olarak açın. https üzerinden yayınlanan bir sayfa tarayıcı tarafından yerel ağdaki HTTP cihazlarına erişemez.
+- Tarayıcı “yerel ağdaki cihazlara erişim” izni sorarsa izin verin.
+- Bilgisayar ile cihazlar aynı ağda olmalıdır. Misafir ağlarında sık görülen istemci yalıtımı (client/AP isolation) açıksa cihazlara hiç ulaşılamaz.
+- STA girişi açık olan cihazlar listede görünür; arayüzleri açılırken kullanıcı adı ve parola istenir.
 
 ## OTA firmware güncellemesi
 
@@ -602,9 +648,12 @@ Bu uç noktalar web arayüzünün dahili API'sidir; sürümler arasında değiş
 | POST | `/api/content` | İçerik tasarımını doğrular ve kaydeder |
 | GET | `/api/font?id=N` | Font bitmap ve glif metriklerini döndürür |
 | GET | `/api/temperature` | Seçili sensörü, bulunma durumunu, sıcaklık ve nemi döndürür |
+| GET | `/api/discover` | Girişsiz ve CORS açık: STEP-RGB imzası, cihaz kimliği, adı, sürümü ve panel bilgisi |
+| POST | `/api/identify` | Girişsiz ve CORS açık: paneli 6 saniye yakıp söndürür |
+| POST | `/api/settings/device` | `deviceName` ile cihaz adını kaydeder; boş ad varsayılana döner |
 | GET | `/api/countdown` | Geri sayım durumunu, geçen süreyi, alarm durumunu ve kutuların kalan süresini döndürür |
 | POST | `/api/countdown` | `action=start`, `pause` veya `reset` ile geri sayımı başlatır, durdurur veya sıfırlar |
-| POST | `/api/settings/panel` | Panel ayarlarını kaydeder; yalnızca parlaklık değiştiyse yeniden başlatmaz |
+| POST | `/api/settings/panel` | Panel tipi ve panel ayarlarını kaydeder; yalnızca parlaklık değiştiyse yeniden başlatmaz |
 | POST | `/api/settings/clock` | DS3231 saat/tarihini ayarlar |
 | POST | `/api/settings/sleep` | Panel uyku ayarlarını kaydeder |
 | POST | `/api/settings/time-sync` | NTP sunucusu, saat dilimi ve açık/kapalı durumunu kaydeder |
@@ -727,13 +776,15 @@ ESP32_S3_LedMatrix_Controller/
 │   ├── SettingsService.cpp         # NVS, doğrulama ve migration
 │   ├── TimeSyncApplication.cpp     # NTP → DS3231 eşitleme
 │   ├── OnlineUpdateService.cpp     # GitHub üzerinden çevrimiçi güncelleme
+│   ├── DeviceIdentity.cpp          # MAC tabanlı kimlik, ağ adı ve keşif imzası
 │   └── ...
 ├── tools/
 │   ├── generate_portal_compressed.mjs
 │   ├── generate_turkish_font_extensions.py
 │   └── publish_firmware.py         # firmware dalı için dosyaları hazırlar
 ├── web/
-│   └── portal-i18n.js              # Beş dilli çeviri paketi
+│   ├── portal-i18n.js              # Beş dilli çeviri paketi
+│   └── cihaz-yoneticisi.html       # Ağdaki bütün cihazları bulan yönetici sayfası
 └── platformio.ini
 ```
 
@@ -808,6 +859,7 @@ ESP32_S3_LedMatrix_Controller/
 ## Bilinen sınırlar
 
 - Yalnızca 32×16, 1/4 veya 1/8 scan panel düzenleri desteklenir.
+- Tek renk panellerde yalnızca Freetronics DMD ile aynı eşlemeye sahip 32×16, 1/4 taramalı HUB12 P10 modüller desteklenir; piksel açık/kapalıdır, iki renkli modüllerin yeşil kanalı kullanılmaz.
 - D/E satır adresi gerektiren 1/16 ve 1/32 scan paneller mevcut pin planıyla desteklenmez.
 - En fazla 4×4 panel ve panel başına 2 içerik kutusu kullanılabilir.
 - Toplam içerik kapasitesi en fazla 32 kutudur.

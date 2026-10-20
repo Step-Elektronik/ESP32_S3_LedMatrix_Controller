@@ -37,10 +37,13 @@ public:
   int32_t stationRssi() const;
   uint8_t stationSignalQuality() const;
   uint32_t stationRetrySeconds() const;
+  // step-rgb-xxxx; also reachable as step-rgb-xxxx.local.
+  const String &hostname() const;
 
 private:
   bool startAccessPoint();
   bool startCaptiveDns();
+  void startMdns();
   bool isAccessPointHealthy() const;
   void maintainStation();
   void startStationAttempt();
@@ -52,6 +55,7 @@ private:
 
   SettingsService &settings_;
   DNSServer dnsServer_;
+  String hostname_;
   bool ready_ = false;
   int lastStaStatus_ = -1;
   uint8_t lastApClientCount_ = 0;

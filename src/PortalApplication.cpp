@@ -12,6 +12,7 @@
 #include "AppConfig.h"
 #include "BootGuardService.h"
 #include "CalendarDate.h"
+#include "DeviceIdentity.h"
 #include "ClockApplication.h"
 #include "CountdownApplication.h"
 #include "FirmwareUpdateService.h"
@@ -33,6 +34,8 @@ namespace {
 
 constexpr uint32_t restartDelayMs = 1500;
 constexpr uint32_t colorTestDurationMs = 750;
+constexpr uint32_t identifyDurationMs = 6000;
+constexpr uint32_t identifyFlashMs = 300;
 constexpr size_t maximumContentBodySize = 8192;
 constexpr size_t fontPreviewHeaderSize = 14;
 constexpr size_t fontPreviewGlyphSize = 8;
@@ -615,9 +618,22 @@ void PortalApplication::update()
   if (colorTestActive_
       && millis() - colorTestStartedAt_ >= colorTestDurationMs) {
     colorTestActive_ = false;
-    content_.setRenderingPaused(false);
-    content_.refresh();
-    panelSleep_.setTemporaryWakeOverride(false);
+    endPanelTest();
+  }
+
+  if (identifyActive_) {
+    const uint32_t elapsed = millis() - identifyStartedAt_;
+    if (elapsed >= identifyDurationMs) {
+      identifyActive_ = false;
+      endPanelTest();
+    } else {
+      const uint8_t phase = static_cast<uint8_t>((elapsed / identifyFlashMs) & 1U);
+      if (phase != identifyPhase_) {
+        identifyPhase_ = phase;
+        const uint8_t level = phase == 0 ? 255 : 0;
+        panel_.showSolidColor(level, level, level);
+      }
+    }
   }
 
   if (restartPending_ && millis() - restartScheduledAt_ >= restartDelayMs) {
@@ -650,6 +666,11 @@ void PortalApplication::configureRoutes()
   onAuthorized("/api/settings/communication", HTTP_POST, &PortalApplication::saveCommunicationSettings);
   onAuthorized("/api/settings/wifi", HTTP_POST, &PortalApplication::saveNetworkSettings);
   onAuthorized("/api/panel/test", HTTP_POST, &PortalApplication::startPanelColorTest);
+  onAuthorized("/api/settings/device", HTTP_POST, &PortalApplication::saveDeviceSettings);
+  // No login: the device manager lists devices before the user opens one.
+  // Discovery reveals no secrets and identify only flashes the panel.
+  webServer_.on("/api/discover", HTTP_GET, [this]() { sendDiscoveryJson(); });
+  webServer_.on("/api/identify", HTTP_POST, [this]() { startIdentify(); });
   onAuthorized("/api/firmware/online", HTTP_GET, &PortalApplication::sendOnlineUpdateJson);
   onAuthorized("/api/firmware/online", HTTP_POST, &PortalApplication::controlOnlineUpdate);
   webServer_.on(
@@ -1147,17 +1168,42 @@ void PortalApplication::savePanelSettings()
   }
   panel.connectionStyle = static_cast<PanelConnectionStyle>(connectionStyle);
 
+  // Pages from before HUB12 support send no panel type; keep the stored one.
+  const PanelSettings current = settings_.panel();
+  panel.type = current.type;
+  panel.hub12DataInverted = current.hub12DataInverted;
+  panel.hub12OeInverted = current.hub12OeInverted;
+  String typeText;
+  if (postValue("panelType", typeText)) {
+    uint8_t type = 0;
+    if (!parseUnsignedByte(
+          typeText,
+          static_cast<uint8_t>(PanelType::rgbHub75),
+          static_cast<uint8_t>(PanelType::monoHub12),
+          type)) {
+      sendJson(false, UI_TEXT("Panel tipi geçersiz."), 400);
+      return;
+    }
+    panel.type = static_cast<PanelType>(type);
+    panel.hub12DataInverted = webServer_.arg("hub12DataInverted") == "1";
+    panel.hub12OeInverted = webServer_.arg("hub12OeInverted") == "1";
+  }
+
   String error;
   if (!SettingsService::validatePanel(panel, error)) {
     sendJson(false, error, 400);
     return;
   }
 
-  const PanelSettings current = settings_.panel();
+  // The panel type and HUB12 signal polarity are set up at boot.
   const bool layoutChanged = panel.scanDivisor != current.scanDivisor
     || panel.rows != current.rows
     || panel.columns != current.columns
-    || panel.connectionStyle != current.connectionStyle;
+    || panel.connectionStyle != current.connectionStyle
+    || panel.type != current.type
+    || (panel.type == PanelType::monoHub12
+        && (panel.hub12DataInverted != current.hub12DataInverted
+            || panel.hub12OeInverted != current.hub12OeInverted));
   // Checked before saving: content is validated against the stored layout.
   const bool contentFits = !layoutChanged
     || SettingsService::validateContent(settings_.content(), panel, error);
@@ -1732,9 +1778,106 @@ void PortalApplication::startPanelColorTest()
   content_.setRenderingPaused(true);
   panel_.setBrightness(testBrightness);
   panel_.showSolidColor(red, green, blue);
+  identifyActive_ = false;
   colorTestActive_ = true;
   colorTestStartedAt_ = millis();
   sendJson(true, UI_TEXT("Renk testi başlatıldı."));
+}
+
+void PortalApplication::endPanelTest()
+{
+  content_.setRenderingPaused(false);
+  content_.refresh();
+  panelSleep_.setTemporaryWakeOverride(false);
+}
+
+void PortalApplication::sendDiscoveryJson()
+{
+  // The signature (device + vendor) is what tells these controllers apart
+  // from everything else on the network.
+  const PanelSettings &panel = settings_.panel();
+  const bool station = wifi_.stationHasIpAddress();
+  String json;
+  json.reserve(448);
+  json += F("{\"device\":\"");
+  json += DeviceIdentity::signatureDevice;
+  json += F("\",\"vendor\":\"");
+  json += DeviceIdentity::signatureVendor;
+  json += F("\",\"protocol\":");
+  json += DeviceIdentity::discoveryProtocol;
+  json += F(",\"id\":\"");
+  json += DeviceIdentity::id();
+  json += F("\",\"name\":\"");
+  json += escapeJson(settings_.deviceName());
+  json += F("\",\"hostname\":\"");
+  json += escapeJson(wifi_.hostname());
+  json += F("\",\"version\":\"");
+  json += escapeJson(AppConfig::firmwareVersion);
+  json += F("\",\"ip\":\"");
+  json += station ? wifi_.stationIpAddress() : WiFi.softAPIP().toString();
+  json += F("\",\"rssi\":");
+  json += wifi_.stationRssi();
+  json += F(",\"uptime\":");
+  json += millis() / 1000UL;
+  json += F(",\"auth\":");
+  json += settings_.network().stationPortalAuthentication ? F("true") : F("false");
+  json += F(",\"panel\":{\"type\":");
+  json += static_cast<uint8_t>(panel.type);
+  json += F(",\"rows\":");
+  json += panel.rows;
+  json += F(",\"columns\":");
+  json += panel.columns;
+  json += F(",\"brightness\":");
+  json += panel.brightness;
+  json += F("}}");
+
+  webServer_.sendHeader("Access-Control-Allow-Origin", "*");
+  webServer_.sendHeader("Cache-Control", "no-store");
+  webServer_.send(200, "application/json; charset=utf-8", json);
+}
+
+void PortalApplication::startIdentify()
+{
+  webServer_.sendHeader("Access-Control-Allow-Origin", "*");
+  if (!panel_.ready()) {
+    sendJson(false, UI_TEXT("Panel kullanılabilir değil."), 503);
+    return;
+  }
+
+  // Flashes at the configured brightness, or the test brightness while the
+  // panel sleeps, so the device stands out without dazzling.
+  const uint8_t brightness = settings_.panel().brightness > 0
+    ? settings_.panel().brightness
+    : AppConfig::panelTestMaximumBrightness;
+  panelSleep_.setTemporaryWakeOverride(true);
+  content_.setRenderingPaused(true);
+  panel_.setBrightness(min(brightness, AppConfig::panelTestMaximumBrightness));
+  colorTestActive_ = false;
+  identifyActive_ = true;
+  identifyStartedAt_ = millis();
+  identifyPhase_ = UINT8_MAX;
+  Serial.println("Identify: flashing the panel.");
+  sendJson(true, UI_TEXT("Cihaz paneli birkaç saniye yanıp sönecek."));
+}
+
+void PortalApplication::saveDeviceSettings()
+{
+  String name;
+  if (!postValue("deviceName", name)) {
+    sendJson(false, UI_TEXT("Cihaz adı eksik."), 400);
+    return;
+  }
+  name.trim();
+  String error;
+  if (!SettingsService::validateDeviceName(name, error)) {
+    sendJson(false, error, 400);
+    return;
+  }
+  if (!settings_.saveDeviceName(name)) {
+    sendJson(false, UI_TEXT("Cihaz adı flash belleğe kaydedilemedi."), 500);
+    return;
+  }
+  sendJson(true, UI_TEXT("Cihaz adı kaydedildi."));
 }
 
 String PortalApplication::buildSettingsJson()
@@ -1776,7 +1919,15 @@ String PortalApplication::buildSettingsJson()
   json += escapeJson(AppConfig::firmwareVersion);
   json += F("\",\"access\":\"");
   json += requestFromStation() ? F("sta") : F("ap");
-  json += F("\",\"panel\":{\"scan\":");
+  json += F("\",\"device\":{\"name\":\"");
+  json += escapeJson(settings_.deviceName());
+  json += F("\",\"defaultName\":\"");
+  json += escapeJson(DeviceIdentity::defaultName());
+  json += F("\",\"id\":\"");
+  json += DeviceIdentity::id();
+  json += F("\",\"hostname\":\"");
+  json += escapeJson(wifi_.hostname());
+  json += F("\"},\"panel\":{\"scan\":");
   json += panel.scanDivisor;
   json += F(",\"rows\":");
   json += panel.rows;
@@ -1788,6 +1939,12 @@ String PortalApplication::buildSettingsJson()
   json += panel.brightness;
   json += F(",\"connectionStyle\":");
   json += static_cast<uint8_t>(panel.connectionStyle);
+  json += F(",\"type\":");
+  json += static_cast<uint8_t>(panel.type);
+  json += F(",\"hub12DataInverted\":");
+  json += panel.hub12DataInverted ? F("true") : F("false");
+  json += F(",\"hub12OeInverted\":");
+  json += panel.hub12OeInverted ? F("true") : F("false");
   json += F("},\"communication\":{\"baudRate\":");
   json += communication.baudRate;
   json += F(",\"slaveAddress\":");
@@ -1935,6 +2092,8 @@ String PortalApplication::buildContentJson() const
   json += AppConfig::panelHeight;
   json += F(",\"maxPerPanel\":");
   json += maxBoxesPerPanel;
+  json += F(",\"monochrome\":");
+  json += panel.type == PanelType::monoHub12 ? F("true") : F("false");
   json += F("},");
   appendSensorJson(json);
   json += F(",\"defaultFont\":");

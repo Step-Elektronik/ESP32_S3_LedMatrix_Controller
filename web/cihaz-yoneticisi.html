@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <title>STEP-RGB Cihaz Yöneticisi</title>
+  <!--
+    Lists every STEP-RGB controller on the local network and opens its own web
+    interface. Open this file directly in a browser (double click); served over
+    https the browser would block requests to the devices. Devices are found by
+    asking each address for /api/discover and keeping only the answers that
+    carry the STEP-RGB signature (see include/DeviceIdentity.h).
+  -->
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #07111f; color: #eaf2ff;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; margin: 0; }
+    body {
+      background:
+        radial-gradient(circle at 12% 5%, rgba(36,119,255,.18), transparent 32rem),
+        radial-gradient(circle at 92% 92%, rgba(0,220,180,.10), transparent 28rem),
+        #07111f;
+    }
+    button, input { font: inherit; }
+    [hidden] { display: none !important; }
+    .shell { width: min(1180px,100%); margin: 0 auto; padding: 18px 16px 40px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .mark {
+      width: 43px; height: 43px; display: grid; place-items: center; border-radius: 14px;
+      color: white; font-size: 12px; font-weight: 900; letter-spacing: -.04em;
+      background: linear-gradient(145deg,#2e8cff,#0068f0); box-shadow: 0 10px 28px rgba(0,105,240,.32);
+    }
+    h1 { margin: 0; font-size: clamp(21px,4vw,29px); }
+    .subtitle { margin: 3px 0 0; color: #91a5c2; font-size: 13px; }
+    .card {
+      border: 1px solid rgba(255,255,255,.10); border-radius: 20px;
+      background: rgba(10,24,42,.82); box-shadow: 0 18px 48px rgba(0,0,0,.24);
+    }
+    .scan-card { padding: 18px; margin-bottom: 18px; }
+    .scan-row, .add-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+    .add-row { margin-top: 14px; }
+    .field { display: grid; gap: 7px; min-width: 0; flex: 1 1 260px; }
+    label { color: #aebed4; font-size: 12px; font-weight: 800; }
+    input {
+      width: 100%; min-height: 44px; padding: 10px 12px; color: #edf5ff;
+      border: 1px solid rgba(255,255,255,.12); border-radius: 11px; outline: none; background: rgba(255,255,255,.055);
+    }
+    input:focus { border-color: #4497ff; box-shadow: 0 0 0 3px rgba(35,129,255,.14); }
+    .btn {
+      min-height: 44px; padding: 9px 16px; color: white; cursor: pointer; font-weight: 800; white-space: nowrap;
+      border: 1px solid rgba(255,255,255,.12); border-radius: 12px; background: rgba(255,255,255,.07);
+      text-decoration: none; display: inline-flex; align-items: center; justify-content: center;
+    }
+    .btn.primary { border-color: #328aff; background: #1676ef; box-shadow: 0 8px 22px rgba(0,105,240,.22); }
+    .btn.danger { color: #ffb5bd; border-color: rgba(255,80,100,.28); background: rgba(255,52,77,.10); }
+    .btn.small { min-height: 36px; padding: 6px 11px; font-size: 13px; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+    .hint { margin: 10px 0 0; color: #8195b2; font-size: 12px; line-height: 1.5; }
+    .warning {
+      margin: 0 0 18px; padding: 12px 14px; color: #ffd995; font-size: 13px; line-height: 1.45;
+      border: 1px solid rgba(255,180,61,.32); border-radius: 12px; background: rgba(255,153,31,.10);
+    }
+    .progress { height: 8px; margin-top: 14px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.10); }
+    .progress span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#247cf0,#33d0a1); transition: width .15s linear; }
+    .status { min-height: 18px; margin: 10px 0 0; color: #91a5c2; font-size: 13px; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .summary { color: #aabbd2; font-size: 14px; }
+    .summary strong { color: white; }
+    .toolbar input { flex: 0 1 300px; min-height: 40px; }
+    .devices { display: grid; grid-template-columns: repeat(auto-fill,minmax(300px,1fr)); gap: 14px; }
+    .device { padding: 16px; display: grid; gap: 12px; }
+    .device.offline { opacity: .6; }
+    .device-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .dot { flex: 0 0 auto; width: 11px; height: 11px; border-radius: 50%; background: #32ca70; box-shadow: 0 0 0 5px rgba(50,202,112,.15); }
+    .offline .dot { background: #71839b; box-shadow: 0 0 0 5px rgba(113,131,155,.12); }
+    .device h2 { margin: 0; min-width: 0; flex: 1; overflow: hidden; font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { flex: 0 0 auto; padding: 4px 8px; color: #aad0ff; font-size: 11px; font-weight: 800; border-radius: 999px; background: rgba(38,125,255,.14); }
+    .badge.update { color: #06101d; background: #ffd27a; }
+    .address { margin: 0; color: #91a7c3; font-size: 13px; overflow-wrap: anywhere; }
+    .address a { color: #a9cdff; font-weight: 800; text-decoration: none; }
+    .facts { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; font-size: 13px; }
+    .facts dt { color: #8195b2; }
+    .facts dd { margin: 0; color: #dce9fa; }
+    .note { margin: 0; color: #ffd995; font-size: 12px; line-height: 1.4; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .empty { padding: 34px 20px; color: #8297b4; text-align: center; line-height: 1.6; border: 1px dashed rgba(255,255,255,.14); border-radius: 16px; }
+    .viewer { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; background: #07111f; }
+    .viewer-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.10); background: rgba(10,24,42,.95); }
+    .viewer-title { min-width: 0; flex: 1; display: grid; gap: 2px; }
+    .viewer-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .viewer-title span { color: #91a5c2; font-size: 12px; }
+    .viewer iframe { flex: 1; width: 100%; border: 0; background: #07111f; }
+    .toast {
+      position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); z-index: 30;
+      max-width: calc(100% - 36px); padding: 11px 16px; color: white;
+      border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: #172b46;
+      box-shadow: 0 14px 35px rgba(0,0,0,.38); opacity: 0; transform: translate(-50%, 20px);
+      pointer-events: none; transition: opacity .2s, transform .2s;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .toast.error { background: #8f2734; }
+    @media (max-width: 540px) {
+      .subtitle { display: none; }
+      .scan-row .btn, .add-row .btn { flex: 1; }
+      .toolbar input { flex-basis: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark">RGB</div>
+        <div><h1>Cihaz Yöneticisi</h1><p class="subtitle">Aynı ağdaki STEP-RGB cihazlarını bulun, tanıyın ve ayarlayın</p></div>
+      </div>
+    </header>
+
+    <p class="warning" id="https-warning" hidden>Bu sayfa https üzerinden açıldığı için tarayıcı ağdaki cihazlara bağlanamaz. Dosyayı bilgisayarınıza kaydedip çift tıklayarak açın.</p>
+
+    <section class="card scan-card" aria-labelledby="scan-title">
+      <form class="scan-row" id="scan-form">
+        <div class="field">
+          <label id="scan-title" for="range">Taranacak ağ</label>
+          <input id="range" placeholder="192.168.1.0/24" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn primary" id="scan-button" type="submit">Ağı Tara</button>
+        <button class="btn" id="stop-button" type="button" hidden>Durdur</button>
+      </form>
+      <p class="hint">Bilgisayarınızın bağlı olduğu ağı yazın: 192.168.1.0/24, kısaca 192.168.1 ya da 192.168.1.20-192.168.1.80 gibi bir aralık. Ağ adresini Windows'ta komut isteminde ipconfig ile görebilirsiniz. Taranan ağ ve bulunan cihazlar bu bilgisayarda hatırlanır.</p>
+      <div class="progress" id="progress" hidden><span id="progress-bar"></span></div>
+      <p class="status" id="scan-status" role="status" aria-live="polite"></p>
+      <form class="add-row" id="add-form">
+        <div class="field">
+          <label for="add-address">Tek cihaz ekle</label>
+          <input id="add-address" placeholder="Cihazın IP adresi, örn. 192.168.1.50" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn" type="submit">Ekle</button>
+      </form>
+    </section>
+
+    <section class="toolbar" aria-label="Cihaz listesi">
+      <div class="summary" id="summary">Henüz cihaz yok.</div>
+      <input id="filter" type="search" placeholder="Ad, IP veya kimlik ile ara" aria-label="Cihaz ara">
+    </section>
+    <div class="devices" id="devices"></div>
+    <p class="empty" id="empty">Ağı tarayın ya da bir cihazın IP adresini ekleyin. Cihazlar bulunmazsa: bilgisayar ile cihazların aynı ağda olduğunu, ağın istemciler arası iletişimi engellemediğini ve tarayıcının yerel ağ erişimine izin verdiğini kontrol edin.</p>
+  </div>
+
+  <div class="viewer" id="viewer" hidden>
+    <div class="viewer-bar">
+      <div class="viewer-title"><strong id="viewer-name"></strong><span id="viewer-address"></span></div>
+      <button class="btn small" type="button" data-viewer-page="/">Editör</button>
+      <button class="btn small" type="button" data-viewer-page="/settings">Ayarlar</button>
+      <button class="btn small" type="button" id="viewer-identify">Bul</button>
+      <a class="btn small" id="viewer-open" target="_blank" rel="noopener">Yeni sekmede aç</a>
+      <button class="btn small danger" type="button" id="viewer-close">Kapat</button>
+    </div>
+    <iframe id="viewer-frame" title="Cihaz arayüzü"></iframe>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      // Must match include/DeviceIdentity.h on the device.
+      const signatureDevice = 'STEP-RGB';
+      const signatureVendor = 'Step Elektronik';
+      const latestFirmwareUrl = 'https://raw.githubusercontent.com/Step-Elektronik/ESP32_S3_LedMatrix_Controller/firmware/firmware.json';
+      const storageKey = 'step-rgb-device-manager';
+      const probeTimeoutMs = 1500;
+      const refreshTimeoutMs = 3000;
+      const scanConcurrency = 48;
+      const refreshIntervalMs = 15000;
+      const maximumHosts = 1024;
+
+      const $ = id => document.getElementById(id);
+      // id → {id, address, data, online, failures}
+      const devices = new Map();
+      let scan = null;
+      let latestVersion = '';
+      let viewerDevice = null;
+      let toastTimer = 0;
+
+      function showToast(message, error = false) {
+        clearTimeout(toastTimer);
+        const toast = $('toast');
+        toast.textContent = message;
+        toast.className = 'toast show' + (error ? ' error' : '');
+        toastTimer = setTimeout(() => { toast.className = 'toast'; }, 4500);
+      }
+
+      function saveStore() {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify({
+            range: $('range').value.trim(),
+            devices: [...devices.values()].map(device => ({
+              id: device.id,
+              address: device.address,
+              name: device.data ? device.data.name : ''
+            }))
+          }));
+        } catch (_) {}
+      }
+
+      function loadStore() {
+        try {
+          const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+          if (typeof stored.range === 'string') $('range').value = stored.range;
+          (Array.isArray(stored.devices) ? stored.devices : []).forEach(item => {
+            if (typeof item.id !== 'string' || typeof item.address !== 'string') return;
+            devices.set(item.id, {
+              id: item.id,
+              address: item.address,
+              data: {name: String(item.name || item.id)},
+              online: false,
+              failures: 0
+            });
+          });
+        } catch (_) {}
+      }
+
+      // ---- Address ranges -------------------------------------------------
+      function ipToNumber(text) {
+        const parts = text.split('.');
+        if (parts.length !== 4) return null;
+        let value = 0;
+        for (const part of parts) {
+          if (!/^\d{1,3}$/.test(part) || Number(part) > 255) return null;
+          value = value * 256 + Number(part);
+        }
+        return value;
+      }
+      function numberToIp(value) {
+        return [Math.floor(value / 16777216) % 256, Math.floor(value / 65536) % 256, Math.floor(value / 256) % 256, value % 256].join('.');
+      }
+      function addressList(first, last) {
+        const list = [];
+        for (let value = first; value <= last; value++) list.push(numberToIp(value));
+        return list;
+      }
+      // Accepts 192.168.1, 192.168.1.0/24, 192.168.1.20-192.168.1.80,
+      // 192.168.1.20-80 and a single address.
+      function parseRange(input) {
+        let text = input.replace(/\s+/g, '');
+        if (!text) return {error: 'Taranacak ağı yazın, örneğin 192.168.1.0/24.'};
+        if (/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(text)) text += '.0/24';
+        const cidr = /^([\d.]+)\/(\d{1,2})$/.exec(text);
+        if (cidr) {
+          const base = ipToNumber(cidr[1]);
+          const prefix = Number(cidr[2]);
+          if (base === null || prefix < 16 || prefix > 30) return {error: 'Ağ adresi geçersiz; /16 ile /30 arasında bir ağ yazın.'};
+          const size = 2 ** (32 - prefix);
+          const network = base - (base % size);
+          if (size - 2 > maximumHosts) return {error: `En fazla ${maximumHosts} adres taranabilir; daha dar bir ağ ya da aralık yazın.`};
+          return {list: addressList(network + 1, network + size - 2)};
+        }
+        const span = /^([\d.]+)-([\d.]+)$/.exec(text);
+        if (span) {
+          const first = ipToNumber(span[1]);
+          let last = /^\d{1,3}$/.test(span[2]) && first !== null
+            ? first - (first % 256) + Number(span[2])
+            : ipToNumber(span[2]);
+          if (first === null || last === null || last < first) return {error: 'Adres aralığı geçersiz.'};
+          if (last - first + 1 > maximumHosts) return {error: `En fazla ${maximumHosts} adres taranabilir.`};
+          return {list: addressList(first, last)};
+        }
+        if (ipToNumber(text) !== null) return {list: [text]};
+        return {error: 'Ağ adresi anlaşılamadı. Örnek: 192.168.1.0/24'};
+      }
+
+      // ---- Talking to devices -----------------------------------------------
+      // Only answers carrying the STEP-RGB signature count as devices.
+      async function probe(address, timeoutMs) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const response = await fetch(`http://${address}/api/discover`, {cache: 'no-store', signal: controller.signal});
+          if (!response.ok) return null;
+          const data = await response.json();
+          return data && data.device === signatureDevice && data.vendor === signatureVendor && typeof data.id === 'string'
+            ? data
+            : null;
+        } catch (_) {
+          return null;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      function remember(address, data) {
+        const known = devices.get(data.id) || {id: data.id};
+        known.address = address;
+        known.data = data;
+        known.online = true;
+        known.failures = 0;
+        devices.set(data.id, known);
+      }
+
+      async function runScan(event) {
+        event.preventDefault();
+        if (scan) return;
+        const parsed = parseRange($('range').value);
+        if (parsed.error) { showToast(parsed.error, true); return; }
+        const list = parsed.list;
+        scan = {stopped: false};
+        const current = scan;
+        let next = 0;
+        let done = 0;
+        let found = 0;
+        $('scan-button').disabled = true;
+        $('stop-button').hidden = false;
+        $('progress').hidden = false;
+        const progress = () => {
+          $('progress-bar').style.width = `${Math.round(done * 100 / list.length)}%`;
+          $('scan-status').textContent = `${done} / ${list.length} adres tarandı • ${found} cihaz bulundu`;
+        };
+        progress();
+        const worker = async () => {
+          while (!current.stopped && next < list.length) {
+            const address = list[next++];
+            const data = await probe(address, probeTimeoutMs);
+            done++;
+            if (data) {
+              found++;
+              remember(address, data);
+              render();
+            }
+            progress();
+          }
+        };
+        await Promise.all(Array.from({length: Math.min(scanConcurrency, list.length)}, worker));
+        scan = null;
+        $('scan-button').disabled = false;
+        $('stop-button').hidden = true;
+        $('progress').hidden = true;
+        $('scan-status').textContent = current.stopped
+          ? `Tarama durduruldu • ${found} cihaz bulundu.`
+          : found
+            ? `Tarama tamamlandı • ${list.length} adreste ${found} cihaz bulundu.`
+            : `Tarama tamamlandı • ${list.length} adreste cihaz bulunamadı.`;
+        saveStore();
+        render();
+      }
+
+      async function addDevice(event) {
+        event.preventDefault();
+        const address = $('add-address').value.trim();
+        if (!address) return;
+        const data = await probe(address, refreshTimeoutMs);
+        if (!data) {
+          showToast(`${address} adresinde STEP-RGB cihazı bulunamadı.`, true);
+          return;
+        }
+        remember(address, data);
+        $('add-address').value = '';
+        saveStore();
+        render();
+        showToast(`${data.name} eklendi.`);
+      }
+
+      // Keeps the list current; a device counts as offline after two misses.
+      async function refresh() {
+        if (scan || document.hidden || devices.size === 0) return;
+        await Promise.all([...devices.values()].map(async device => {
+          const data = await probe(device.address, refreshTimeoutMs);
+          if (data && data.id === device.id) {
+            remember(device.address, data);
+          } else {
+            device.failures = (device.failures || 0) + 1;
+            if (device.failures >= 2) device.online = false;
+          }
+        }));
+        saveStore();
+        render();
+      }
+
+      async function identify(device) {
+        try {
+          const response = await fetch(`http://${device.address}/api/identify`, {method: 'POST', cache: 'no-store'});
+          if (!response.ok) throw new Error();
+          showToast(`${device.data.name}: panel birkaç saniye yanıp sönecek.`);
+        } catch (_) {
+          showToast(`${device.data.name} cihazına ulaşılamadı.`, true);
+        }
+      }
+
+      async function loadLatestVersion() {
+        try {
+          const response = await fetch(latestFirmwareUrl, {cache: 'no-store'});
+          const data = await response.json();
+          if (typeof data.version === 'string') latestVersion = data.version;
+        } catch (_) {
+          latestVersion = '';
+        }
+        render();
+      }
+
+      // ---- Rendering --------------------------------------------------------
+      function compareVersions(a, b) {
+        const left = String(a).split('.').map(Number);
+        const right = String(b).split('.').map(Number);
+        for (let index = 0; index < 3; index++) {
+          const difference = (left[index] || 0) - (right[index] || 0);
+          if (difference) return difference;
+        }
+        return 0;
+      }
+      function formatUptime(seconds) {
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor(seconds % 86400 / 3600);
+        const minutes = Math.floor(seconds % 3600 / 60);
+        if (days) return `${days} gün ${hours} sa`;
+        if (hours) return `${hours} sa ${minutes} dk`;
+        return `${minutes} dk`;
+      }
+      function element(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      }
+      function button(label, handler, className = 'btn small') {
+        const node = element('button', className, label);
+        node.type = 'button';
+        node.addEventListener('click', handler);
+        return node;
+      }
+      function fact(list, label, value) {
+        list.append(element('dt', '', label), element('dd', '', value));
+      }
+
+      function deviceCard(device) {
+        const data = device.data || {};
+        const card = element('article', 'card device' + (device.online ? '' : ' offline'));
+        const head = element('div', 'device-head');
+        head.append(element('span', 'dot'), element('h2', '', data.name || device.id));
+        if (data.version) {
+          head.append(element('span', 'badge', `v${data.version}`));
+          if (latestVersion && compareVersions(data.version, latestVersion) < 0) {
+            head.append(element('span', 'badge update', 'Güncelleme var'));
+          }
+        }
+        card.append(head);
+
+        const address = element('p', 'address');
+        const link = element('a', '', device.address);
+        link.href = `http://${device.address}/`;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        address.append(link);
+        if (data.hostname) address.append(document.createTextNode(` • ${data.hostname}.local`));
+        card.append(address);
+
+        if (device.online && data.panel) {
+          const facts = element('dl', 'facts');
+          fact(facts, 'Panel', `${data.panel.columns} × ${data.panel.rows} • ${Number(data.panel.type) === 1 ? 'Tek renk (HUB12)' : 'RGB (HUB75)'}`);
+          fact(facts, 'Wi-Fi', data.rssi ? `${data.rssi} dBm` : 'Yalnızca cihazın kendi ağı');
+          fact(facts, 'Çalışma süresi', formatUptime(Number(data.uptime) || 0));
+          fact(facts, 'Kimlik', device.id);
+          card.append(facts);
+        } else if (!device.online) {
+          card.append(element('p', 'note', 'Şu anda yanıt vermiyor. Cihaz kapalı olabilir ya da IP adresi değişmiş olabilir; ağı yeniden tarayın.'));
+        }
+        if (data.auth) {
+          card.append(element('p', 'note', 'Bu cihaz yerel ağdan erişimde kullanıcı adı (admin) ve AP parolasını ister.'));
+        }
+
+        const actions = element('div', 'actions');
+        actions.append(
+          button('Bul', () => identify(device)),
+          button('Editör', () => openViewer(device, '/'), 'btn small primary'),
+          button('Ayarlar', () => openViewer(device, '/settings'))
+        );
+        if (!device.online) {
+          actions.append(button('Listeden çıkar', () => {
+            devices.delete(device.id);
+            saveStore();
+            render();
+          }, 'btn small danger'));
+        }
+        card.append(actions);
+        return card;
+      }
+
+      function render() {
+        const query = $('filter').value.trim().toLocaleLowerCase('tr');
+        const all = [...devices.values()];
+        const shown = all
+          .filter(device => !query || [device.data && device.data.name, device.address, device.id]
+            .some(value => String(value || '').toLocaleLowerCase('tr').includes(query)))
+          .sort((a, b) => String(a.data && a.data.name || a.id).localeCompare(String(b.data && b.data.name || b.id), 'tr', {numeric: true}));
+        $('devices').replaceChildren(...shown.map(deviceCard));
+        $('empty').hidden = all.length !== 0;
+
+        const online = all.filter(device => device.online).length;
+        const outdated = latestVersion
+          ? all.filter(device => device.online && device.data && device.data.version && compareVersions(device.data.version, latestVersion) < 0).length
+          : 0;
+        const summary = $('summary');
+        summary.replaceChildren();
+        if (!all.length) {
+          summary.textContent = 'Henüz cihaz yok.';
+          return;
+        }
+        summary.append(element('strong', '', `${all.length} cihaz`), document.createTextNode(` • ${online} çevrimiçi`));
+        if (latestVersion) {
+          summary.append(document.createTextNode(` • GitHub'daki son sürüm v${latestVersion}`));
+          if (outdated) summary.append(document.createTextNode(` • ${outdated} cihazda güncelleme var`));
+        }
+      }
+
+      // ---- Embedded device interface ---------------------------------------
+      function openViewer(device, page) {
+        viewerDevice = device;
+        $('viewer-name').textContent = device.data && device.data.name || device.id;
+        $('viewer-address').textContent = `http://${device.address}${page}`;
+        $('viewer-open').href = `http://${device.address}${page}`;
+        $('viewer-frame').src = `http://${device.address}${page}`;
+        $('viewer').hidden = false;
+        document.body.style.overflow = 'hidden';
+      }
+      function closeViewer() {
+        $('viewer').hidden = true;
+        $('viewer-frame').src = 'about:blank';
+        document.body.style.overflow = '';
+        viewerDevice = null;
+        refresh();
+      }
+      document.querySelectorAll('[data-viewer-page]').forEach(node => node.addEventListener('click', () => {
+        if (viewerDevice) openViewer(viewerDevice, node.dataset.viewerPage);
+      }));
+      $('viewer-identify').addEventListener('click', () => { if (viewerDevice) identify(viewerDevice); });
+      $('viewer-close').addEventListener('click', closeViewer);
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !$('viewer').hidden) closeViewer();
+      });
+
+      // ---- Start ------------------------------------------------------------
+      $('https-warning').hidden = location.protocol !== 'https:';
+      $('scan-form').addEventListener('submit', runScan);
+      $('stop-button').addEventListener('click', () => { if (scan) scan.stopped = true; });
+      $('add-form').addEventListener('submit', addDevice);
+      $('filter').addEventListener('input', render);
+      $('range').addEventListener('change', saveStore);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+
+      loadStore();
+      render();
+      loadLatestVersion();
+      if (devices.size) {
+        refresh();
+      } else if ($('range').value.trim()) {
+        $('scan-form').requestSubmit();
+      }
+      setInterval(refresh, refreshIntervalMs);
+    })();
+  </script>
+</body>
+</html>

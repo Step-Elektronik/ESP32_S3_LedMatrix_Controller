@@ -21,12 +21,25 @@ enum class PanelConnectionStyle : uint8_t {
   bottomLeftUpZigzag = 8
 };
 
+// Which header drives the panels. Both share OE, A, B, C, CLK and LAT; the
+// HUB12 header carries R, G and D on the HUB75 R1, G1 and B1 lines.
+enum class PanelType : uint8_t {
+  rgbHub75 = 0,
+  // Single-colour P10 modules, 32x16, 1/4 scan.
+  monoHub12 = 1
+};
+
 struct PanelSettings {
   uint8_t scanDivisor = 4;
   uint8_t rows = 1;
   uint8_t columns = 1;
   uint8_t brightness = 64;
   PanelConnectionStyle connectionStyle = PanelConnectionStyle::topRightDown;
+  PanelType type = PanelType::rgbHub75;
+  // Most HUB12 modules take active-low data and an active-high OE; both are
+  // inverted in the GPIO matrix and can be switched for modules that differ.
+  bool hub12DataInverted = true;
+  bool hub12OeInverted = true;
 
   uint16_t panelCount() const
   {
@@ -89,6 +102,8 @@ public:
   const AlarmSettings &alarms() const;
   const SchoolBellSettings &schoolBell() const;
   AlarmMode alarmMode() const;
+  // The name shown by the device manager; a MAC based default until set.
+  String deviceName() const;
   const ContentSettings &content() const;
   bool usesDefaultApPassword() const;
 
@@ -101,6 +116,8 @@ public:
   bool saveAlarms(const AlarmSettings &settings);
   bool saveSchoolBell(const SchoolBellSettings &settings);
   bool saveAlarmMode(AlarmMode mode);
+  // An empty name restores the default.
+  bool saveDeviceName(const String &name);
   bool saveContent(const ContentSettings &settings);
   bool factoryReset();
 
@@ -120,6 +137,7 @@ public:
   static bool validateSchoolBell(
     const SchoolBellSettings &settings,
     String &error);
+  static bool validateDeviceName(const String &name, String &error);
   static bool validateContent(
     const ContentSettings &settings,
     const PanelSettings &panel,
@@ -141,6 +159,8 @@ private:
   AlarmSettings alarms_;
   SchoolBellSettings schoolBell_;
   AlarmMode alarmMode_ = AlarmMode::manual;
+  // Empty while the default name is used.
+  String deviceName_;
   ContentSettings content_;
   bool ready_ = false;
 };
