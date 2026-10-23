@@ -15,7 +15,7 @@
 #endif
 
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "0.15.1"
+#define FIRMWARE_VERSION "0.17.0"
 #endif
 
 namespace AppConfig {
@@ -109,6 +109,7 @@ constexpr uint32_t toggleIntervalMs = 1000;
 
 namespace Alarm {
 constexpr int8_t relayPin = 42;
+// The relay driver energises the relay on a HIGH level; LOW releases it.
 constexpr bool relayActiveHigh = true;
 } // namespace Alarm
 
@@ -135,11 +136,21 @@ constexpr uint32_t maximumResponseDelayMs = 250;
 
 namespace DigitalInput {
 constexpr int8_t pin = 12;
-constexpr uint32_t debounceMs = 30;
+// The board filters the input with 100 nF, so a short debounce is enough.
+constexpr uint32_t debounceMs = 10;
 // The input is sampled by a hardware timer callback, so counting does not
 // depend on how long the main loop is busy.
 constexpr uint32_t samplePeriodUs = 1000;
 } // namespace DigitalInput
+
+namespace ValueStore {
+// ValueBox values survive a power loss in this data partition of the default
+// 8 MB partition table. The firmware does not use it otherwise, so devices
+// updated over the air need no new partition table.
+constexpr char partitionLabel[] = "spiffs";
+// A changed value is written at most this long after the change.
+constexpr uint32_t checkIntervalMs = 200;
+} // namespace ValueStore
 
 constexpr uint16_t panelWidth = 32;
 constexpr uint16_t panelHeight = 16;

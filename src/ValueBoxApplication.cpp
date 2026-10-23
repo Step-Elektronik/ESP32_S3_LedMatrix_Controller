@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <driver/gpio.h>
+#include <esp_rom_crc.h>
 #include <limits.h>
 #include <memory>
 #include <new>
@@ -40,7 +41,9 @@ ValueBoxApplication::ValueBoxApplication(SettingsService &settings)
 
 void ValueBoxApplication::begin()
 {
-  pinMode(AppConfig::DigitalInput::pin, INPUT_PULLDOWN);
+  // The board's external pull-down holds the idle level, so the internal
+  // pull resistors stay off.
+  pinMode(AppConfig::DigitalInput::pin, INPUT);
   samplerLevel_ = digitalRead(AppConfig::DigitalInput::pin) == HIGH;
   samplerStableSamples_ = 0;
   samplerArmed_ = false;
@@ -65,8 +68,12 @@ void ValueBoxApplication::begin()
 
   ready_ = true;
   reload();
+  if (store_.begin()) {
+    restoreStoredValues();
+  }
+  lastStoreCheck_ = millis();
   Serial.printf(
-    "Digital counter input ready on GPIO %d with internal pull-down; %lu ms debounce, sampled every %lu us.\n",
+    "Digital counter input ready on GPIO %d without internal pull; %lu ms debounce, sampled every %lu us.\n",
     AppConfig::DigitalInput::pin,
     static_cast<unsigned long>(AppConfig::DigitalInput::debounceMs),
     static_cast<unsigned long>(AppConfig::DigitalInput::samplePeriodUs));
@@ -81,6 +88,12 @@ void ValueBoxApplication::update()
   const uint32_t edges = pendingRisingEdges_.exchange(0);
   if (edges > 0) {
     applyDigitalInputEdges(edges);
+  }
+
+  const uint32_t now = millis();
+  if (now - lastStoreCheck_ >= AppConfig::ValueStore::checkIntervalMs) {
+    lastStoreCheck_ = now;
+    storeChangedValues();
   }
 }
 
@@ -136,6 +149,11 @@ void ValueBoxApplication::reload()
     Serial.printf("ValueBox reload kept %u current value(s).\n", preserved);
   }
   ++revision_;
+}
+
+bool ValueBoxApplication::clearStoredValues()
+{
+  return store_.clear();
 }
 
 void ValueBoxApplication::formatValue(
@@ -328,6 +346,86 @@ bool ValueBoxApplication::sameSource(
   return left.modbusValueType == ModbusValueType::ieee754Float
     ? left.initialFloatBits == right.initialFloatBits
     : left.initialIntegerValue == right.initialIntegerValue;
+}
+
+uint32_t ValueBoxApplication::storedIdentity(const RuntimeValue &value)
+{
+  // The fields sameSource() compares: a stored value comes back only into a
+  // box that would also keep it across a design save.
+  uint32_t words[4] = {
+    static_cast<uint32_t>(value.source),
+    0,
+    0,
+    static_cast<uint32_t>(value.initialIntegerValue)};
+  if (value.source == ValueSource::modbus) {
+    words[1] = static_cast<uint32_t>(value.modbusValueType);
+    words[2] = value.registerAddress;
+    if (value.modbusValueType == ModbusValueType::ieee754Float) {
+      words[3] = value.initialFloatBits;
+    }
+  }
+  return esp_rom_crc32_le(
+    0,
+    reinterpret_cast<const uint8_t *>(words),
+    sizeof(words));
+}
+
+uint32_t ValueBoxApplication::valueBits(const RuntimeValue &value)
+{
+  return value.source == ValueSource::modbus
+      && value.modbusValueType == ModbusValueType::ieee754Float
+    ? floatBits(value.floatValue)
+    : static_cast<uint32_t>(value.integerValue);
+}
+
+void ValueBoxApplication::restoreStoredValues()
+{
+  uint8_t restored = 0;
+  for (uint8_t index = 0; index < maxContentItems; ++index) {
+    RuntimeValue &value = runtime_[index];
+    const ValueBoxStore::Entry &stored = store_.entry(index);
+    if (!value.active
+        || !stored.valid
+        || stored.identity != storedIdentity(value)) {
+      continue;
+    }
+    if (value.source == ValueSource::modbus
+        && value.modbusValueType == ModbusValueType::ieee754Float) {
+      std::memcpy(&value.floatValue, &stored.bits, sizeof(stored.bits));
+    } else {
+      value.integerValue = static_cast<int32_t>(stored.bits);
+    }
+    ++restored;
+  }
+  if (restored > 0) {
+    ++revision_;
+    Serial.printf("ValueBox restored %u value(s) from flash.\n", restored);
+  }
+}
+
+void ValueBoxApplication::storeChangedValues()
+{
+  if (!store_.ready()) {
+    return;
+  }
+  for (uint8_t index = 0; index < maxContentItems; ++index) {
+    const RuntimeValue &value = runtime_[index];
+    if (!value.active) {
+      if (store_.entry(index).valid) {
+        store_.forget(index);
+      }
+      continue;
+    }
+    const uint32_t identity = storedIdentity(value);
+    const uint32_t bits = valueBits(value);
+    const ValueBoxStore::Entry &stored = store_.entry(index);
+    if (stored.valid && stored.identity == identity && stored.bits == bits) {
+      continue;
+    }
+    if (!store_.save(index, identity, bits)) {
+      return;
+    }
+  }
 }
 
 void ValueBoxApplication::sampleDigitalInput(void *context)

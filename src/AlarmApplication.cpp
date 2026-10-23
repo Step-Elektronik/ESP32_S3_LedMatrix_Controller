@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <RTClib.h>
+#include <driver/gpio.h>
 
 #include "AppConfig.h"
 #include "CalendarDate.h"
@@ -35,8 +36,14 @@ AlarmApplication::AlarmApplication(
 void AlarmApplication::begin()
 {
   const uint8_t inactiveLevel = AppConfig::Alarm::relayActiveHigh ? LOW : HIGH;
-  digitalWrite(AppConfig::Alarm::relayPin, inactiveLevel);
+  // digitalWrite() is ignored until pinMode() has run, and pinMode() alone
+  // drives the pin LOW. Setting the output latch first lets the pin come up
+  // already inactive, whichever level the relay driver uses.
+  gpio_set_level(
+    static_cast<gpio_num_t>(AppConfig::Alarm::relayPin),
+    inactiveLevel);
   pinMode(AppConfig::Alarm::relayPin, OUTPUT);
+  digitalWrite(AppConfig::Alarm::relayPin, inactiveLevel);
   ready_ = true;
   Serial.printf(
     "Alarm relay ready on IO%d; inactive at startup.\n",

@@ -667,6 +667,7 @@ void PortalApplication::configureRoutes()
   onAuthorized("/api/settings/wifi", HTTP_POST, &PortalApplication::saveNetworkSettings);
   onAuthorized("/api/panel/test", HTTP_POST, &PortalApplication::startPanelColorTest);
   onAuthorized("/api/settings/device", HTTP_POST, &PortalApplication::saveDeviceSettings);
+  onAuthorized("/api/factory-reset", HTTP_POST, &PortalApplication::factoryReset);
   // No login: the device manager lists devices before the user opens one.
   // Discovery reveals no secrets and identify only flashes the panel.
   webServer_.on("/api/discover", HTTP_GET, [this]() { sendDiscoveryJson(); });
@@ -1878,6 +1879,46 @@ void PortalApplication::saveDeviceSettings()
     return;
   }
   sendJson(true, UI_TEXT("Cihaz adı kaydedildi."));
+}
+
+void PortalApplication::factoryReset()
+{
+  // The page asks for confirmation and sends confirm=1; a request without
+  // it is rejected.
+  if (webServer_.arg("confirm") != "1") {
+    sendJson(false, UI_TEXT("Fabrika ayarlarına dönüş onaylanmadı."), 400);
+    return;
+  }
+  if (onlineUpdate_.busy()) {
+    sendJson(
+      false,
+      UI_TEXT("Güncelleme sürerken fabrika ayarlarına dönülemez."),
+      409);
+    return;
+  }
+
+  countdown_.reset();
+  onlineUpdate_.setAutomaticCheck(true);
+  if (!settings_.factoryReset()) {
+    sendJson(
+      false,
+      UI_TEXT("Fabrika ayarları flash belleğe kaydedilemedi."),
+      500);
+    return;
+  }
+  // Reload first, so the old values are not written back before restart.
+  valueBoxes_.reload();
+  countdown_.reload();
+  content_.reload();
+  if (!valueBoxes_.clearStoredValues()) {
+    Serial.println("ERROR: Stored ValueBox values could not be cleared.");
+  }
+
+  Serial.println("Factory reset requested from the portal.");
+  sendJson(
+    true,
+    UI_TEXT("Fabrika ayarları yüklendi. Cihaz yeniden başlatılıyor."));
+  scheduleRestart();
 }
 
 String PortalApplication::buildSettingsJson()

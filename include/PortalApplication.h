@@ -84,6 +84,7 @@ private:
   void sendDiscoveryJson();
   void startIdentify();
   void saveDeviceSettings();
+  void factoryReset();
   void endPanelTest();
   void handleFirmwareUpload();
   void finishFirmwareUploadRequest();

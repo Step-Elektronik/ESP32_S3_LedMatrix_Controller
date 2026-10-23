@@ -339,7 +339,7 @@ constexpr char homeHtml[] PROGMEM = R"HTML(<!doctype html>
             </div>
             <div id="digitalInputOptions" hidden>
               <div class="field"><label for="counterDirection">Sayaç yönü</label><select id="counterDirection"><option value="0">Yukarı sayıcı</option><option value="1">Aşağı sayıcı</option></select></div>
-              <p class="cycle-note">IO12 dahili pull-down ile LOW seviyesinde bekler. Debounce sonrasındaki LOW → HIGH yükselen kenarında değer artırılır veya azaltılır. Negatif değerler gösterilebilir.</p>
+              <p class="cycle-note">IO12 girişinde dahili pull direnci kullanılmaz; boştaki LOW seviyesini harici devre sağlar. Debounce sonrasındaki LOW → HIGH yükselen kenarında değer artırılır veya azaltılır. Negatif değerler gösterilebilir.</p>
             </div>
           </div>
           <div class="field">
@@ -1252,6 +1252,7 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
       border: 0; border-radius: 12px; background: #247cf0; font-weight: 800;
     }
     .button.secondary { background: #21344d; color: #d9e7fa; }
+    .button.danger { background: #c8323f; }
     .button:disabled { opacity: .45; cursor: not-allowed; }
     .alarm-summary {
       display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -1886,6 +1887,12 @@ constexpr char settingsHtml[] PROGMEM = R"HTML(<!doctype html>
         </div>
         <div class="actions"><button class="button" id="firmware-submit" type="submit" disabled>Güncellemeyi Başlat</button></div>
       </form>
+
+      <div class="section-form">
+        <h3 class="subsection-title">Fabrika ayarları</h3>
+        <p class="sleep-hint">Panel, Wi-Fi, haberleşme, saat eşitleme, sensör, alarm, okul saati, cihaz adı ve içerik tasarımı dahil bütün ayarlar silinir; ValueBox değerleri ve geri sayım da sıfırlanır. Firmware sürümü ve DS3231 saati değişmez. Cihaz yeniden başladıktan sonra varsayılan STEP-RGB ağına 00000000 parolasıyla bağlanmanız gerekir.</p>
+        <div class="actions"><button class="button danger" id="factory-reset" type="button">Fabrika Ayarlarına Dön</button></div>
+      </div>
     </section>
 
     <footer><span>Yazılım v</span>)HTML"
@@ -3068,6 +3075,25 @@ R"HTML(</footer>
       sendOnlineUpdate({action:'install'});
     });
     byId('onlineUpdateAuto').addEventListener('change', event => sendOnlineUpdate({action:'auto', enabled:event.target.checked ? '1' : '0'}));
+
+    byId('factory-reset').addEventListener('click', async () => {
+      if (!confirm(t('Bütün ayarlar silinecek ve cihaz fabrika ayarlarıyla yeniden başlayacak. Wi-Fi ayarları da sıfırlanacağı için cihaza yeniden STEP-RGB ağı üzerinden bağlanmanız gerekecek. Bu işlem geri alınamaz. Devam edilsin mi?'))) return;
+      const button = byId('factory-reset');
+      button.disabled = true;
+      try {
+        const result = await request('/api/factory-reset', {
+          method: 'POST',
+          headers: {'Content-Type':'application/x-www-form-urlencoded'},
+          body: new URLSearchParams({confirm:'1'})
+        });
+        // Pauses status polling and uploads while the device restarts.
+        firmwareUploadActive = true;
+        showStatus(I18n.server(result.message, 'Fabrika ayarları yüklendi. Cihaz yeniden başlatılıyor.'));
+      } catch (error) {
+        button.disabled = false;
+        showStatus(error.message, true);
+      }
+    });
 
     document.querySelectorAll('[data-color]').forEach(button => button.addEventListener('click', async () => {
       try {

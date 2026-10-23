@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "ContentModel.h"
+#include "ValueBoxStore.h"
 
 class SettingsService;
 
@@ -16,6 +17,9 @@ public:
   void begin();
   void update();
   void reload();
+  // Factory reset: forgets the values kept in flash. Call after the design
+  // was reset and reloaded, so the old values are not written back.
+  bool clearStoredValues();
 
   // Writes the current value with its decimals and unit suffix as UTF-8.
   void formatValue(uint8_t contentIndex, char *buffer, size_t bufferSize) const;
@@ -47,7 +51,12 @@ private:
 
   static RuntimeValue initialRuntime(const ContentItemSettings &item);
   static bool sameSource(const RuntimeValue &left, const RuntimeValue &right);
+  static uint32_t storedIdentity(const RuntimeValue &value);
+  static uint32_t valueBits(const RuntimeValue &value);
   static void sampleDigitalInput(void *context);
+
+  void restoreStoredValues();
+  void storeChangedValues();
 
   bool findModbusRegister(
     uint16_t address,
@@ -59,6 +68,8 @@ private:
   RuntimeValue runtime_[maxContentItems] = {};
   uint32_t revision_ = 0;
   bool ready_ = false;
+  ValueBoxStore store_;
+  uint32_t lastStoreCheck_ = 0;
 
   esp_timer_handle_t sampleTimer_ = nullptr;
   std::atomic<uint32_t> pendingRisingEdges_{0};

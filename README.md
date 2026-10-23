@@ -8,7 +8,7 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 
 | Özellik | Değer |
 |---|---|
-| Firmware sürümü | `0.15.1` |
+| Firmware sürümü | `0.17.0` |
 | Mikrodenetleyici hedefi | ESP32-S3 |
 | PlatformIO kartı | `esp32-s3-devkitc1-n8r2` |
 | Önerilen modül | ESP32-S3-WROOM-1-N8R2 |
@@ -43,6 +43,7 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 - Modbus RTU slave üzerinden ValueBox güncelleme; donanım RS485 yön kontrolü ve donanım çerçeve ayırma
 - ValueBox için ondalık basamak/ondalık nokta kaydırma ve birim son eki
 - GPIO12 yükselen kenar sayacı; ana döngüden bağımsız 1 ms örnekleme
+- ValueBox değerlerinin elektrik kesintisine karşı flash'ta korunması (200 ms kontrol, aşınmayı dağıtan halka kayıt)
 - En fazla 10 programlanabilir alarm
 - Okul saati: 20 derse kadar ders ve teneffüs zilleri, öğrenci zili, Türkiye resmi tatilleri (yarım gün arifeler dahil), tatil dönemleri ve 10 Kasım saygı duruşu zili
 - Geri sayım (örneğin sınav, toplantı veya yarışma süresi): saat/dakika/saniye süresi, web üzerinden Başlat/Durdur/Sıfırla, süre bitince ayarlanabilir süreyle alarm rölesi; elektrik kesintisinde DS3231 ile kaldığı yerden devam
@@ -54,6 +55,7 @@ Firmware aynı zamanda Modbus RTU slave, dijital giriş sayacı, DS3231 gerçek 
 - İsteğe bağlı olarak yerel ağdan (STA) erişimde HTTP Digest girişi; kayıtlı parolalar tarayıcıya gönderilmez
 - NVS/Preferences üzerinde kalıcı ayarlar ve eski şemaları otomatik yükseltme
 - Watchdog ve art arda çöken açılışlarda fabrika ayarına dönüş koruması
+- Web arayüzünden onaylı fabrika ayarlarına dönüş
 
 ## Sistem mimarisi
 
@@ -142,11 +144,11 @@ HUB12 modunda aynı DMA sürücüsü kullanılır; farklı olan üç nokta vard�
 | Buzzer | GPIO13 | Buzzer sürücü girişi | Aktif HIGH, açılışta kısa darbeler |
 | AP istemci LED'i | GPIO14 | Direnç → LED → GND | Aktif HIGH, 1 saniye aralıkla yanıp söner |
 | STA bağlantı LED'i | GPIO21 | Direnç → LED → GND | Aktif HIGH, 1 saniye aralıkla yanıp söner |
-| Alarm rölesi | GPIO42 | Röle sürücü girişi | Aktif HIGH |
+| Alarm rölesi | GPIO42 | Röle sürücü girişi | Aktif HIGH: HIGH röleyi çeker, LOW bırakır |
 | Modbus RX | GPIO39 | RS485 transceiver `RO` | UART1 RX |
 | Modbus TX | GPIO40 | RS485 transceiver `DI` | UART1 TX |
 | Modbus DIR | GPIO41 | RS485 `DE` + `/RE` | UART RTS; HIGH gönderme, LOW alma |
-| Dijital sayaç | GPIO12 | Korunmuş dijital giriş | Dahili pull-down, LOW→HIGH sayımı |
+| Dijital sayaç | GPIO12 | Korunmuş dijital giriş | Dahili pull direnci yok; harici pull-down + 100 nF, LOW→HIGH sayımı |
 
 ### Programlama ve ayrılması gereken pinler
 
@@ -194,10 +196,10 @@ GPIO39–42 bu projede RS485 ve röle için kullanıldığı için harici pad-JT
 
 ### Röle, buzzer ve dijital giriş
 
-- Röle bobinini GPIO42'ye doğrudan bağlamayın. MOSFET/transistör, gate/base direnci, pull-down ve flyback diyodu kullanın.
-- GPIO42'ye harici pull-down eklemek rölenin açılışta yanlışlıkla tetiklenmesini önler.
+- Röle bobinini GPIO42'ye doğrudan bağlamayın. Röle, GPIO42 HIGH olduğunda çekecek şekilde sürülür; MOSFET/transistör, gate/base direnci, pull-down ve flyback diyodu kullanın.
+- GPIO42'ye harici pull-down ekleyin. ESP32 açılırken, yeniden başlarken ve OTA sonrası pin bir süre boşta kalır; pull-down bu sırada röleyi bırakılmış tutar.
 - Buzzer akımı GPIO sınırını aşıyorsa GPIO13'ü yalnızca sürücü girişi olarak kullanın.
-- GPIO12 yalnızca 3.3 V lojik seviyeyi kabul etmelidir. Harici saha girişi için seri direnç, harici pull-down, Schmitt trigger/optoizolasyon ve ESD koruması değerlendirilmelidir.
+- GPIO12 yalnızca 3.3 V lojik seviyeyi kabul etmelidir. Firmware dahili pull direnci kullanmaz; giriş hiçbir zaman boşta kalmamalı, boştaki LOW seviyesini harici pull-down sağlamalıdır. Boşta kalan giriş gürültüyü darbe olarak sayar. Harici saha girişi için seri direnç, 100 nF filtre kondansatörü, Schmitt trigger/optoizolasyon ve ESD koruması değerlendirilmelidir.
 
 ### ESP32-S3 besleme, USB ve anten
 
@@ -220,6 +222,7 @@ Başvuru belgeleri:
 
 | Ayar | Varsayılan |
 |---|---|
+| Panel tipi | RGB HUB75 |
 | Panel tarama | Derleme sırasındaki `PANEL_SCAN_DIVISOR`, varsayılan 1/4 |
 | Panel yerleşimi | 1 satır × 1 sütun |
 | Panel bağlantı yönü | Sağ üstten aşağı |
@@ -241,6 +244,11 @@ Başvuru belgeleri:
 | NTP eşitleme | Devre dışı; `pool.ntp.org`, saat dilimi UTC+3 (`<+03>-3`) |
 | Yerel ağ (STA) portal girişi | Kapalı; açılırsa kullanıcı `admin`, parola AP parolası |
 | Alarmlar | Boş |
+| Alarm modu | Manuel alarm |
+| Cihaz adı | `STEP-RGB-XXXX` (XXXX: MAC adresinin son dört hanesi) |
+| Çevrimiçi güncelleme denetimi | Açık, günde bir kez |
+| Kayıtlı ValueBox değerleri | Yok; kutular başlangıç değerinden başlar |
+| Dijital giriş debounce | 10 ms |
 | Seri monitör | 115200 baud |
 | Watchdog | 20 saniye |
 
@@ -322,7 +330,7 @@ ValueBox iki kaynaktan değer alabilir:
 1. Modbus RTU holding register
 2. GPIO12 dijital giriş sayacı
 
-Modbus kaynağında signed 16-bit integer veya IEEE-754 float seçilebilir. Dijital giriş kaynağında yukarı/aşağı sayma ve 32-bit başlangıç değeri ayarlanabilir. Cihaz yeniden başladığında çalışma değeri kayıtlı başlangıç değerinden başlar; runtime Modbus/sayaç değeri NVS'ye sürekli yazılmaz.
+Modbus kaynağında signed 16-bit integer veya IEEE-754 float seçilebilir. Dijital giriş kaynağında yukarı/aşağı sayma ve 32-bit başlangıç değeri ayarlanabilir. Değişen değerler flash'a kaydedilir; cihaz yeniden başladığında veya elektrik geldiğinde her ValueBox son değeriyle devam eder (bkz. [Elektrik kesintisinde değerlerin korunması](#elektrik-kesintisinde-değerlerin-korunması)).
 
 Tasarım kaydedildiğinde veri kaynağı (kaynak türü, register adresi/değer tipi) ve başlangıç değeri değişmeyen ValueBox'lar mevcut değerlerini korur; kutuyu taşımak, rengini veya fontunu değiştirmek ya da yeni kutu eklemek sayacı sıfırlamaz. Kaynağı veya başlangıç değeri değişen kutu başlangıç değerinden yeniden başlar.
 
@@ -330,6 +338,25 @@ Gösterim seçenekleri:
 
 - **Ondalık basamak (0–3):** Float değer bu basamağa yuvarlanır. Integer ve sayaç değerlerinde ondalık nokta kaydırılır; örneğin register değeri `1234` ve 2 basamak `12.34` olarak gösterilir.
 - **Birim / son ek:** Değerin sonuna eklenir, örneğin `°C` veya ` bar`. En fazla 15 UTF-8 bayttır ve TextBox ile aynı karakter kümesini kullanır.
+
+#### Elektrik kesintisinde değerlerin korunması
+
+Tasarımda en az bir ValueBox varsa firmware değerleri her 200 ms'de kontrol eder ve son kayıttan beri değişen her ValueBox'ın değerini flash'a yazar. Açılışta her kutu kayıtlı son değeriyle devam eder. Elektrik kesildiğinde en fazla son 200 ms içindeki değişiklik kaybolur. Sayaç darbeleri ve Modbus ile yazılan değerler aynı şekilde korunur.
+
+- **Kayıt alanı:** Varsayılan 8 MB bölüm tablosundaki 1,5 MB'lık `spiffs` veri bölümü. Firmware bu bölümü başka bir iş için kullanmaz. Bölüm tablosu değişmediği için özellik OTA ile güncellenen cihazlarda da çalışır.
+- **Kayıt düzeni:** Her değer 16 baytlık bir kayıttır: kutu sırası, kaynak özeti, değer ve CRC32. Kayıtlar bölüm boyunca halka şeklinde art arda yazılır, aynı flash adresi tekrar tekrar silinmez. 4 KB'lık bir sektör dolunca sıradaki sektör silinir ve önce bütün güncel değerlerin bir kopyası yazılır. Böylece en eski sektör silindiğinde uzun süredir değişmeyen bir değer kaybolmaz.
+- **Kesinti güvenliği:** Kayıt yazılırken elektrik kesilirse yarım kalan kayıt CRC ile ayıklanır ve kutu bir önceki değerle açılır. Sektör silinirken veya kopya yazılırken kesilirse bir önceki sektör kullanılır.
+- **Hangi değer geri gelir:** Kayıtlı değer, kutunun kaynağı (kaynak türü, register adresi/değer tipi) ve başlangıç değeri kayıt anındakiyle aynıysa geri yüklenir. Bu, tasarım kaydında değerin korunma kuralıyla aynıdır. Bir sayacı sıfırlamak için başlangıç değerini değiştirip tasarımı kaydedin.
+- **USB:** Normal USB yükleme ve OTA güncelleme kayıtlı değerlere dokunmaz. "Erase Flash" yapılırsa değerler de silinir.
+
+Flash ömrü: Bölüm 384 sektördür ve her sektör yaklaşık 100.000 silme döngüsüne dayanır. Tahmini ömür, ne kadar ValueBox'ın ne sıklıkla değiştiğine bağlıdır:
+
+| Kullanım | Sektör başına silme | Tahmini ömür |
+|---|---:|---:|
+| Her 200 ms'de değişen 1 sayaç | ~4,4 / gün | ~60 yıl |
+| Her saniye değişen 10 Modbus değeri | ~9 / gün | ~30 yıl |
+| Her 200 ms'de değişen 10 ValueBox | ~46 / gün | ~6 yıl |
+| Her 200 ms'de değişen 32 ValueBox (en kötü durum) | ~160 / gün | ~1,7 yıl |
 
 ### Ayarlar sayfası
 
@@ -346,6 +373,17 @@ Ayarlar ekranı şu grupları içerir:
 - Cihaz adı (cihaz yöneticisinde görünen ad), Wi-Fi AP ve STA ayarları
 - STA bağlantı durumu, IP ve sinyal kalitesi
 - OTA firmware güncellemesi
+- Fabrika ayarlarına dönüş (Yazılım Güncelleme sekmesinde)
+
+#### Fabrika ayarlarına dönüş
+
+Ayarlar → Yazılım Güncelleme sekmesinin altındaki **Fabrika Ayarlarına Dön** düğmesi, tarayıcıda onay aldıktan sonra cihazı fabrika ayarlarına döndürür ve yeniden başlatır:
+
+- Panel, Wi-Fi (AP ve STA), haberleşme, NTP, sensör, alarm, okul saati, panel uyku, cihaz adı ve içerik tasarımı varsayılanlara döner.
+- Flash'ta tutulan ValueBox değerleri silinir, geri sayım sıfırlanır ve çevrimiçi güncellemenin otomatik denetimi yeniden açılır.
+- Firmware sürümü, DS3231 saati ve boot guard sayaçları değişmez.
+- Wi-Fi ayarları da sıfırlandığı için cihaz yeniden başladıktan sonra varsayılan `STEP-RGB` ağına `00000000` parolasıyla bağlanmak gerekir.
+- Çevrimiçi güncelleme indirilirken veya kurulurken fabrika ayarlarına dönülemez.
 
 ### Dil desteği
 
@@ -439,11 +477,11 @@ Float değerlerde word sırası `High Word → Low Word` şeklindedir. Her Modbu
 - Register `100`: IEEE-754 bitlerinin üst 16 biti
 - Register `101`: IEEE-754 bitlerinin alt 16 biti
 
-Modbus ile gelen değer yalnızca çalışma belleğinde tutulur. Yeniden başlatmada ValueBox, web arayüzünde tanımlanan başlangıç değerine döner.
+Modbus ile yazılan değer de flash'a kaydedilir. Yeniden başlatmada ValueBox son yazılan değerle devam eder (bkz. [Elektrik kesintisinde değerlerin korunması](#elektrik-kesintisinde-değerlerin-korunması)).
 
 ## Dijital giriş sayacı
 
-GPIO12 dahili pull-down ile LOW seviyesinde bekler. Giriş, ana döngüden bağımsız bir `esp_timer` geri çağrısıyla her 1 ms'de örneklenir; web sayfası sunulurken veya flash yazılırken gelen darbeler kaçmaz. Debounce süresi 30 ms'dir; bir darbenin sayılması için girişin en az 30 ms LOW ve ardından 30 ms HIGH kalması gerekir (en fazla yaklaşık 16 darbe/saniye). Kararlı bir `LOW → HIGH` kenarı geldiğinde dijital giriş kaynağını kullanan ValueBox öğeleri yön ayarına göre bir artırılır veya azaltılır.
+GPIO12'de dahili pull direnci kullanılmaz; boştaki LOW seviyesini kart üzerindeki harici pull-down sağlar, 100 nF kondansatör kontak sıçramalarını yumuşatır. Giriş, ana döngüden bağımsız bir `esp_timer` geri çağrısıyla her 1 ms'de örneklenir; web sayfası sunulurken veya ana döngü meşgulken gelen darbeler kaçmaz. Flash silme işlemleri sırasında (ValueBox kayıt alanında sektör değişimi, ayar kaydı, OTA) örnekleme birkaç on milisaniye durabilir. Debounce süresi 10 ms'dir; bir darbenin sayılması için girişin en az 10 ms LOW ve ardından 10 ms HIGH kalması gerekir (en fazla yaklaşık 45 darbe/saniye). Kararlı bir `LOW → HIGH` kenarı geldiğinde dijital giriş kaynağını kullanan ValueBox öğeleri yön ayarına göre bir artırılır veya azaltılır.
 
 - Sayaç türü: signed 32-bit
 - Aralık: `-2147483648` … `2147483647`
@@ -451,6 +489,7 @@ GPIO12 dahili pull-down ile LOW seviyesinde bekler. Giriş, ana döngüden bağ�
 - Negatif değerler panelde gösterilebilir
 - Birden fazla dijital ValueBox aynı fiziksel kenarı birlikte işler
 - Tasarım kaydedildiğinde başlangıç değeri değişmeyen sayaçlar değerini korur
+- Son değer elektrik kesintisinde korunur
 
 ## Saat, sıcaklık, alarm ve panel uyku işlevi
 
@@ -507,7 +546,7 @@ Her iki modda:
 - Çakışan zil/alarm sürelerinde röle kapanış zamanı daha ileri olana uzatılır
 - Geri sayım aynı röleyi kullanır; röle, programlanmış alarm veya geri sayım alarmından biri sürdükçe açık kalır
 - **Zili Test Et** düğmesi röleyi hemen çalıştırır (okul saatinde zil süresi kadar, en fazla 30 saniye; manuel modda 3 saniye)
-- GPIO42 aktif HIGH çalışır
+- GPIO42 aktif HIGH çalışır: HIGH röleyi çeker, LOW bırakır
 
 ### Okul saati
 
@@ -628,7 +667,7 @@ SHA-256 denetimi bozuk veya yarım indirmeyi yakalar; GitHub hesabının ele ge�
 
 Panel, ağ, UART, uyku, NTP, alarm, okul saati ve içerik ayarları ESP32 Preferences/NVS içinde `step-rgb` namespace'i altında tutulur. Okul saati programı `school_bell` (şema sürümü 1), etkin alarm modu `alarm_mode` anahtarındadır; bu anahtarlar yoksa manuel alarm modu ve boş bir okul programı kullanılır.
 
-İçerik ayarları şema sürümü 8'dir. Eski içerik şemaları 1–7 arasında algılanıp yeni yapıya taşınır; taşınan kutular “Tüm ekran” gösterim alanını, float ValueBox'lar 1 ondalık basamağı korur ve geri sayım alanları varsayılan değerleri (40 dakika, 10 saniye alarm) alır. Geri sayımın çalışma durumu ayrı `countdown` namespace'inde tutulur. Kayıtlı blok yükleme ve taşıma sırasında ana döngü yığınına değil heap'e alınır. Alarm şeması sürüm 2'dir ve eski tekrar ayarları gün maskesine yükseltilir. Geçersiz veya eksik NVS verileri güvenli varsayılanlarla onarılır.
+İçerik ayarları şema sürümü 8'dir. Eski içerik şemaları 1–7 arasında algılanıp yeni yapıya taşınır; taşınan kutular “Tüm ekran” gösterim alanını, float ValueBox'lar 1 ondalık basamağı korur ve geri sayım alanları varsayılan değerleri (40 dakika, 10 saniye alarm) alır. Geri sayımın çalışma durumu ayrı `countdown` namespace'inde tutulur. ValueBox değerleri NVS'de değil, `spiffs` veri bölümünde halka kayıt olarak tutulur (bkz. [Elektrik kesintisinde değerlerin korunması](#elektrik-kesintisinde-değerlerin-korunması)). Kayıtlı blok yükleme ve taşıma sırasında ana döngü yığınına değil heap'e alınır. Alarm şeması sürüm 2'dir ve eski tekrar ayarları gün maskesine yükseltilir. Geçersiz veya eksik NVS verileri güvenli varsayılanlarla onarılır.
 
 Boot guard yalnızca anormal biten açılışları sayar: önceki çalışma panik, watchdog veya brownout ile bittiyse sayaç artar. Güç kesip açmak, reset butonu veya yazılımsal yeniden başlatma zinciri sıfırlar; böylece cihazı kısa aralıklarla açıp kapatmak fabrika ayarına dönüşü tetiklemez. Cihaz 60 saniye kararlı çalışınca sayaç temizlenir. Beşten fazla art arda anormal reset algılanırsa ayarlar fabrika varsayılanlarına döndürülür.
 
@@ -651,6 +690,7 @@ Bu uç noktalar web arayüzünün dahili API'sidir; sürümler arasında değiş
 | GET | `/api/discover` | Girişsiz ve CORS açık: STEP-RGB imzası, cihaz kimliği, adı, sürümü ve panel bilgisi |
 | POST | `/api/identify` | Girişsiz ve CORS açık: paneli 6 saniye yakıp söndürür |
 | POST | `/api/settings/device` | `deviceName` ile cihaz adını kaydeder; boş ad varsayılana döner |
+| POST | `/api/factory-reset` | `confirm=1` ile bütün ayarları ve kayıtlı ValueBox değerlerini siler, cihazı yeniden başlatır |
 | GET | `/api/countdown` | Geri sayım durumunu, geçen süreyi, alarm durumunu ve kutuların kalan süresini döndürür |
 | POST | `/api/countdown` | `action=start`, `pause` veya `reset` ile geri sayımı başlatır, durdurur veya sıfırlar |
 | POST | `/api/settings/panel` | Panel tipi ve panel ayarlarını kaydeder; yalnızca parlaklık değiştiyse yeniden başlatmaz |
@@ -777,6 +817,7 @@ ESP32_S3_LedMatrix_Controller/
 │   ├── TimeSyncApplication.cpp     # NTP → DS3231 eşitleme
 │   ├── OnlineUpdateService.cpp     # GitHub üzerinden çevrimiçi güncelleme
 │   ├── DeviceIdentity.cpp          # MAC tabanlı kimlik, ağ adı ve keşif imzası
+│   ├── ValueBoxStore.cpp           # ValueBox değerlerinin flash halka kaydı
 │   └── ...
 ├── tools/
 │   ├── generate_portal_compressed.mjs
@@ -864,14 +905,15 @@ ESP32_S3_LedMatrix_Controller/
 - En fazla 4×4 panel ve panel başına 2 içerik kutusu kullanılabilir.
 - Toplam içerik kapasitesi en fazla 32 kutudur.
 - TextBox metni en fazla 47 UTF-8 byte olabilir.
-- Runtime Modbus/sayaç değerleri yeniden başlatmalar arasında saklanmaz.
+- ValueBox değerleri en geç 200 ms içinde flash'a yazılır; elektrik kesilmeden hemen önceki en fazla 200 ms'lik değişiklik kaybolabilir.
+- ValueBox kayıt alanında sektör değişirken (sürekli değişen tek bir sayaçta yaklaşık dakikada bir, tipik 40–50 ms) dijital giriş örneklemesi durur. Tamamı bu aralığa denk gelen kısa bir darbe sayılmayabilir.
 - Tasarımdaki bütün Geri Sayım kutuları tek bir oturumla yönetilir; kutular ayrı ayrı başlatılamaz.
 - Okul saatinde bütün okul günleri için tek bir ders programı vardır; örneğin cumaya özel farklı bir program tanımlanamaz.
 - Dini bayram tarihleri 2035 yılına kadar firmware içindedir; sonrası için firmware güncellemesi gerekir. Yalnızca Türkiye'deki resmi tatiller tanınır.
 - Geri sayım sürerken DS3231 saati değiştirilir (elle veya NTP ile) ve ardından elektrik kesilirse, kesintide geçen süre saat farkı kadar hatalı hesaplanabilir.
 - Portal HTTP üzerinden çalışır (TLS yok). STA girişi isteğe bağlıdır; açıldığında tek bir yönetici girişi vardır ve parolası AP parolasıdır.
 - Panelde yalnızca ASCII, Türkçe, Almanca ve İspanyolca harfler ile `°` gösterilebilir; Arapça metin panelde gösterilemez.
-- Dijital sayaç debounce nedeniyle saniyede en fazla yaklaşık 16 darbe sayar.
+- Dijital sayaç debounce nedeniyle saniyede en fazla yaklaşık 45 darbe sayar.
 - Donanım RS485 yön kontrolü ve yeni Modbus çerçeve ayırma, gerçek bus üzerinde doğrulanmalıdır.
 
 ## Lisans ve üçüncü taraf bileşenler
