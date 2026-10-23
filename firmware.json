@@ -1,0 +1,9 @@
+{
+  "version": "0.17.0",
+  "file": "firmware-0.17.0-d77b812.bin",
+  "size": 1869936,
+  "sha256": "053029df4138399aeebf2846eb9f699b37f7fda45b079fece9c62691419340dd",
+  "commit": "d77b8127a21c761529576cc36b986280688ad491",
+  "date": "2026-10-23T14:34:41Z",
+  "notes": "Sürüm 0.17.0: ValueBox değerlerinin kalıcı kaydı ve fabrika ayarlarına dönüş"
+}
